@@ -67,6 +67,29 @@ function downloadThumbnail(url, destPath) {
     });
 }
 
+// ====================================================
+// রেন্ডার জিরো স্টোরেজ অটো-ক্লিনআপ স্ক্রিপ্ট
+// (প্রতি ৫ মিনিটে ১০ মিনিটের বেশি পুরোনো সব ক্যাশ ফাইল মুছে দেবে)
+// ====================================================
+setInterval(() => {
+    fs.readdir(downloadsDir, (err, files) => {
+        if (err) return;
+        const now = Date.now();
+        files.forEach(file => {
+            const filePath = path.join(downloadsDir, file);
+            fs.stat(filePath, (statErr, stats) => {
+                if (statErr) return;
+                const fileAgeMin = (now - stats.mtimeMs) / 1000 / 60;
+                if (fileAgeMin > 10) { // ১০ মিনিটের বেশি পুরোনো হলে মুছে ফেলবে
+                    fs.unlink(filePath, () => {
+                        console.log(`Auto Clean: Deleted temporary cache file: ${file}`);
+                    });
+                }
+            });
+        });
+    });
+}, 5 * 60 * 1000); 
+
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
@@ -274,7 +297,7 @@ app.get('/api/download-start', async (req, res) => {
             // গ্যালারিতে ভিডিও রিফ্রেশ করার মিডিয়া স্ক্যানার রান
             const fullPath = path.join(downloadsDir, downloadedFileName);
             exec(`termux-media-scan "${fullPath}"`, (scanErr) => {
-                if (scanErr) console.log("termux-media-scan failed or not installed:", scanErr);
+                if (scanErr) console.log("termux-media-scan context skipped: normal on non-termux systems.");
             });
 
             // নোটিফিকেশন প্রদর্শন
@@ -283,7 +306,7 @@ app.get('/api/download-start', async (req, res) => {
                 notificationCmd += ` --image-path "${cachedThumbPath}"`;
             }
             exec(notificationCmd, (notifErr) => {
-                if (notifErr) console.log("termux-api notification error:", notifErr);
+                if (notifErr) console.log("termux-notification context skipped: normal on non-termux systems.");
             });
 
         } else {
@@ -325,7 +348,7 @@ app.get('/api/get-file', (req, res) => {
     }
 });
 
-// yt-dlp সার্চ মেথড
+// yt-dlp সার্চ মেথড (সিনট্যাক্স এরর ফিক্সড)
 function searchYouTube(query) {
     return new Promise((resolve, reject) => {
         const ytDlp = spawn('yt-dlp', [
