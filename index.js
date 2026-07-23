@@ -8,37 +8,12 @@ const os = require('os');
 const app = express();
 const PORT = 3000;
 
-// অ্যান্ড্রয়েড পাবলিক ডাউনলোড ফোল্ডার পাথ নির্ধারণ
-const homeDir = os.homedir();
-const termuxSharedDir = path.join(homeDir, 'storage', 'shared', 'Download');
-const sdcardDir = '/sdcard/Download';
-
-let downloadsDir = path.join(__dirname, 'downloads');
-
-if (fs.existsSync(sdcardDir)) {
-    downloadsDir = path.join(sdcardDir, 'Minitube');
-} else if (fs.existsSync(termuxSharedDir)) {
-    downloadsDir = path.join(termuxSharedDir, 'Minitube');
-}
-
+const downloadsDir = path.join(__dirname, 'downloads');
 if (!fs.existsSync(downloadsDir)) {
-    try {
-        fs.mkdirSync(downloadsDir, { recursive: true });
-    } catch (e) {
-        downloadsDir = path.join(__dirname, 'downloads');
-        if (!fs.existsSync(downloadsDir)) {
-            fs.mkdirSync(downloadsDir);
-        }
-    }
+    fs.mkdirSync(downloadsDir, { recursive: true });
 }
 
 const streamCache = {}; 
-
-const keepAliveAgent = new https.Agent({
-    keepAlive: true,
-    maxSockets: 500,
-    keepAliveMsecs: 30000
-});
 
 function sanitizeFilename(title) {
     if (!title) return 'video_' + Date.now();
@@ -59,8 +34,6 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
-app.use('/videos', express.static(downloadsDir));
-
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -107,7 +80,7 @@ app.get('/api/info', (req, res) => {
 
     const ytDlp = spawn('yt-dlp', [
         '-j', 
-        '--extractor-args', 'youtube:player_client=default,-android_sdkless',
+        '--extractor-args', 'youtube:player_client=android',
         videoUrl
     ]);
     let stdout = '';
@@ -139,7 +112,7 @@ function formatDuration(sec) {
     return `${m}:${s}`;
 }
 
-// ৪. ক্যাশ মেমোরি নিয়ন্ত্রিত এবং Range সাপোর্ট সমৃদ্ধ হাই-স্পিড প্লেব্যাক প্রক্সি স্ট্রিম
+// ৪. প্লেব্যাক ফিক্স: অ্যান্ড্রয়েড ক্লায়েন্ট দিয়ে আইপি-লক মুক্ত ডিরেক্ট ভিডিও প্লেব্যাক লিংক জেনারেট ও রিডিরেক্ট
 app.get('/api/stream', async (req, res) => {
     const videoUrl = req.query.url;
     const quality = req.query.quality || '360p';
@@ -152,10 +125,11 @@ app.get('/api/stream', async (req, res) => {
         directUrl = streamCache[cacheKey].directUrl;
     } else {
         try {
+            // প্লেব্যাক বাফারিং সমস্যা সমাধানের জন্য কেবল কম্বাইন্ড/প্রোগ্রেসিভ ফরম্যাট ব্যবহার করা হয়েছে
             let format = '18/best[height<=360][ext=mp4]/best';
-            if (quality === '1080p') format = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best';
-            if (quality === '720p') format = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best';
-            if (quality === '480p') format = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best';
+            if (quality === '1080p') format = 'best[height<=1080][ext=mp4]/best';
+            if (quality === '720p') format = '22/best[height<=720][ext=mp4]/best';
+            if (quality === '480p') format = 'best[height<=480][ext=mp4]/best';
             if (quality === '360p') format = '18/best[height<=360][ext=mp4]/best';
 
             directUrl = await getDirectUrl(videoUrl, format);
@@ -168,38 +142,11 @@ app.get('/api/stream', async (req, res) => {
         }
     }
 
-    const range = req.headers.range;
-    const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    };
-    if (range) {
-        headers['Range'] = range;
-    }
-
-    const requestOptions = {
-        method: 'GET',
-        headers: headers,
-        agent: keepAliveAgent
-    };
-
-    const clientReq = https.request(directUrl, requestOptions, (clientRes) => {
-        res.writeHead(clientRes.statusCode, clientRes.headers);
-        clientRes.pipe(res);
-    });
-
-    clientReq.on('error', (err) => {
-        console.error('Proxy stream connection lost:', err);
-        if (!res.headersSent) res.status(500).send('Streaming error');
-    });
-
-    req.on('close', () => {
-        clientReq.destroy();
-    });
-
-    clientReq.end();
+    // ব্রাউজারকে ডিরেক্ট গুগল সার্ভারে রিডিরেক্ট করা হলো যেন বাফারিং ছাড়া সর্বোচ্চ গতিতে কাটা-কাটি করা যায়
+    res.redirect(302, directUrl);
 });
 
-// ৫. VidMate স্টাইল জিরো স্টোরেজ ডিরেক্ট অন-দ্য-ফ্লাই ফাস্ট ডাউনলোড এপিআই
+// ৫. ডাউনলোড ফিক্স: yt-dlp পাইপিংয়ের মাধ্যমে সরাসরি অন-দ্য-ফ্লাই ফাস্ট ডাউনলোড যা সরাসরি গ্যালারিতে যাবে
 app.get('/api/download-fast', async (req, res) => {
     const videoUrl = req.query.url;
     const quality = req.query.quality || '360p';
@@ -217,41 +164,31 @@ app.get('/api/download-fast', async (req, res) => {
     const ext = (quality === 'audio' || quality === 'audio_high') ? 'm4a' : 'mp4';
     const safeTitle = sanitizeFilename(title);
 
-    try {
-        const directUrl = await getDirectUrl(videoUrl, format);
+    // ফাইলটি রেন্ডারে জমা না করে সরাসরি ব্রাউজার স্ট্রিমে পাইপ করা হলো
+    res.attachment(`${safeTitle}.${ext}`);
+    res.setHeader('Content-Type', (quality === 'audio' || quality === 'audio_high') ? 'audio/mp4' : 'video/mp4');
 
-        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeTitle)}.${ext}"`);
-        res.setHeader('Content-Type', (quality === 'audio' || quality === 'audio_high') ? 'audio/mp4' : 'video/mp4');
+    const ytDlp = spawn('yt-dlp', [
+        '-f', format,
+        '-o', '-', // stdout-এ সরাসরি ফাইল রাইট করবে
+        '--no-playlist',
+        '--no-warnings',
+        '--ignore-errors',
+        '--extractor-args', 'youtube:player_client=android',
+        videoUrl
+    ]);
 
-        const requestOptions = {
-            method: 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            },
-            agent: keepAliveAgent
-        };
+    ytDlp.stdout.pipe(res);
 
-        const clientReq = https.request(directUrl, requestOptions, (clientRes) => {
-            if (clientRes.headers['content-length']) {
-                res.setHeader('Content-Length', clientRes.headers['content-length']);
-            }
-            clientRes.pipe(res);
-        });
+    ytDlp.on('close', (code) => {
+        if (code !== 0) {
+            console.error(`yt-dlp download exited with code ${code}`);
+        }
+    });
 
-        clientReq.on('error', (err) => {
-            console.error('Download server stream lost:', err);
-            if (!res.headersSent) res.status(500).send('Download error');
-        });
-
-        req.on('close', () => {
-            clientReq.destroy();
-        });
-
-        clientReq.end();
-    } catch (err) {
-        console.error('Download resolve failed:', err);
-        if (!res.headersSent) res.status(500).send('Failed to fetch download source');
-    }
+    req.on('close', () => {
+        ytDlp.kill();
+    });
 });
 
 function getDirectUrl(videoUrl, format) {
@@ -261,7 +198,7 @@ function getDirectUrl(videoUrl, format) {
             '--no-playlist',
             '--no-warnings',
             '--ignore-errors',
-            '--extractor-args', 'youtube:player_client=default,-android_sdkless',
+            '--extractor-args', 'youtube:player_client=android',
             '-g',
             videoUrl
         ]);
@@ -273,13 +210,12 @@ function getDirectUrl(videoUrl, format) {
             if (code === 0 && stdout.trim()) {
                 resolve(stdout.trim().split('\n')[0]);
             } else {
-                reject(new Error(stderr || 'yt-dlp resolved empty stream'));
+                reject(new Error(stderr || 'yt-dlp stream resolution returned empty'));
             }
         });
     });
 }
 
-// yt-dlp সার্চ মেথড (আনলিমিটেড ৪৫+ ভিডিওর জন্য ytsearch45)
 function searchYouTube(query) {
     return new Promise((resolve, reject) => {
         const ytDlp = spawn('yt-dlp', [
@@ -288,7 +224,7 @@ function searchYouTube(query) {
             '--dump-single-json',
             '--no-warnings',
             '--ignore-errors',
-            '--extractor-args', 'youtube:player_client=default,-android_sdkless'
+            '--extractor-args', 'youtube:player_client=android'
         ]);
 
         let stdout = '';
