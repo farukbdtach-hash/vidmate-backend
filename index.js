@@ -112,7 +112,7 @@ function formatDuration(sec) {
     return `${m}:${s}`;
 }
 
-// ৪. প্লেব্যাক ফিক্স: অ্যান্ড্রয়েড ক্লায়েন্ট দিয়ে আইপি-লক মুক্ত ডিরেক্ট ভিডিও প্লেব্যাক লিংক জেনারেট ও রিডিরেক্ট
+// ৪. প্লেব্যাক ফিক্স: Range Request Proxying (IP-Lock মুক্ত এবং দ্রুত বাফারিং ছাড়া প্লেব্যাক ও কাটা-কাটি)
 app.get('/api/stream', async (req, res) => {
     const videoUrl = req.query.url;
     const quality = req.query.quality || '360p';
@@ -125,7 +125,7 @@ app.get('/api/stream', async (req, res) => {
         directUrl = streamCache[cacheKey].directUrl;
     } else {
         try {
-            // প্লেব্যাক বাফারিং সমস্যা সমাধানের জন্য কেবল কম্বাইন্ড/প্রোগ্রেসিভ ফরম্যাট ব্যবহার করা হয়েছে
+            // প্রগ্রেসিভ সিঙ্গেল ফাইল ফরম্যাট ব্যবহারের মাধ্যমে দ্রুত স্ট্রিমিং নিশ্চিত করা হয়েছে
             let format = '18/best[height<=360][ext=mp4]/best';
             if (quality === '1080p') format = 'best[height<=1080][ext=mp4]/best';
             if (quality === '720p') format = '22/best[height<=720][ext=mp4]/best';
@@ -142,11 +142,46 @@ app.get('/api/stream', async (req, res) => {
         }
     }
 
-    // ব্রাউজারকে ডিরেক্ট গুগল সার্ভারে রিডিরেক্ট করা হলো যেন বাফারিং ছাড়া সর্বোচ্চ গতিতে কাটা-কাটি করা যায়
-    res.redirect(302, directUrl);
+    // ব্রাউজারের Range Request ইউটিউব সার্ভারে প্রক্সি করা হলো, যা কাটা-কাটি (Seeking) দ্রুত করবে
+    try {
+        const parsedUrl = new URL(directUrl);
+        const headers = {};
+        
+        if (req.headers.range) {
+            headers['Range'] = req.headers.range;
+        }
+        headers['User-Agent'] = req.headers['user-agent'] || 'Mozilla/5.0';
+
+        const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || 443,
+            path: parsedUrl.pathname + parsedUrl.search,
+            method: 'GET',
+            headers: headers
+        };
+
+        const proxyReq = https.request(options, (proxyRes) => {
+            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+            proxyRes.pipe(res);
+        });
+
+        proxyReq.on('error', (e) => {
+            console.error('Proxy request error:', e);
+            if (!res.headersSent) res.sendStatus(500);
+        });
+
+        req.on('close', () => {
+            proxyReq.destroy();
+        });
+
+        proxyReq.end();
+
+    } catch (e) {
+        res.status(500).send('Streaming error occurred');
+    }
 });
 
-// ৫. ডাউনলোড ফিক্স: yt-dlp পাইপিংয়ের মাধ্যমে সরাসরি অন-দ্য-ফ্লাই ফাস্ট ডাউনলোড যা সরাসরি গ্যালারিতে যাবে
+// ৫. ডাউনলোড ফিক্স: সরাসরি মোবাইলের গ্যালারিতে সেভ হওয়ার জন্য হেডার এবং ১০৮০পি মার্জিং ফিক্স
 app.get('/api/download-fast', async (req, res) => {
     const videoUrl = req.query.url;
     const quality = req.query.quality || '360p';
@@ -154,23 +189,56 @@ app.get('/api/download-fast', async (req, res) => {
 
     if (!videoUrl) return res.status(400).send('URL is required');
 
-    let format = 'best[ext=mp4]/best';
-    if (quality === '1080p') format = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
-    if (quality === '720p') format = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
-    if (quality === '480p') format = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
-    if (quality === '360p') format = 'best[height<=360][ext=mp4]/best';
-    if (quality === 'audio_high' || quality === 'audio') format = 'ba[ext=m4a]/bestaudio';
-
-    const ext = (quality === 'audio' || quality === 'audio_high') ? 'm4a' : 'mp4';
     const safeTitle = sanitizeFilename(title);
+    const ext = (quality === 'audio' || quality === 'audio_high') ? 'm4a' : 'mp4';
 
-    // ফাইলটি রেন্ডারে জমা না করে সরাসরি ব্রাউজার স্ট্রিমে পাইপ করা হলো
+    // ফাইল ডাউনলোড রেসপন্স হেডার (যাতে ব্রাউজার সরাসরি গ্যালারিতে সেভ করার অপশন পায়)
     res.attachment(`${safeTitle}.${ext}`);
     res.setHeader('Content-Type', (quality === 'audio' || quality === 'audio_high') ? 'audio/mp4' : 'video/mp4');
 
+    // ১০৮০পি ভিডিও ডাউনলোড করার জন্য ভিডিও ও অডিও মার্জ করা প্রয়োজন যা সরাসরি পাইপ করা সম্ভব নয়।
+    // তাই এটি প্রথমে সার্ভারে ডাউনলোড ও মার্জ হয়ে সরাসরি ইউজারের ফোনে চলে যাবে এবং সার্ভার থেকে ডিলিট হয়ে যাবে।
+    if (quality === '1080p') {
+        const tempFilePath = path.join(downloadsDir, `${safeTitle}_temp_${Date.now()}.${ext}`);
+        
+        const ytDlpDownload = spawn('yt-dlp', [
+            '-f', 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            '-o', tempFilePath,
+            '--no-playlist',
+            '--no-warnings',
+            '--ignore-errors',
+            '--extractor-args', 'youtube:player_client=android',
+            videoUrl
+        ]);
+
+        ytDlpDownload.on('close', (code) => {
+            if (code === 0 && fs.existsSync(tempFilePath)) {
+                res.download(tempFilePath, `${safeTitle}.${ext}`, (err) => {
+                    // ডাউনলোড শেষ হলে সার্ভারের জায়গা বাঁচাতে টেম্পোরারি ফাইল ডিলিট করা হলো
+                    fs.unlink(tempFilePath, () => {});
+                });
+            } else {
+                if (!res.headersSent) res.status(500).send('Download and merge failed.');
+            }
+        });
+
+        req.on('close', () => {
+            ytDlpDownload.kill();
+            if (fs.existsSync(tempFilePath)) fs.unlink(tempFilePath, () => {});
+        });
+        return;
+    }
+
+    // ৩৬০পি বা ৭২০পি-র জন্য সরাসরি ইনস্ট্যান্ট ফাস্ট স্ট্রিম পাইপিং (মার্জ করার প্রয়োজন নেই)
+    let format = '18/best[height<=360][ext=mp4]/best';
+    if (quality === '720p') format = '22/best[height<=720][ext=mp4]/best';
+    if (quality === '480p') format = '18/best[height<=480][ext=mp4]/best';
+    if (quality === '360p') format = '18/best[height<=360][ext=mp4]/best';
+    if (quality === 'audio_high' || quality === 'audio') format = '140/ba[ext=m4a]/bestaudio';
+
     const ytDlp = spawn('yt-dlp', [
         '-f', format,
-        '-o', '-', // stdout-এ সরাসরি ফাইল রাইট করবে
+        '-o', '-', 
         '--no-playlist',
         '--no-warnings',
         '--ignore-errors',
