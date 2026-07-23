@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -930,7 +931,7 @@
             transform: translateX(20px);
         }
 
-        /* প্রো ডাউনলোডার শিট */
+        /* প্রো ডাউনলোড শিট */
         .backdrop {
             position: fixed;
             inset: 0;
@@ -1485,6 +1486,7 @@
             searchOverlay.style.display = 'none';
         }
 
+        // ব্রাউজারের ইনপুট ফিল্ড ক্লিয়ার করা
         function clearSearchField() {
             overlaySearchInput.value = '';
             suggestionsList.style.display = 'none';
@@ -1511,7 +1513,7 @@
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(async () => {
                 try {
-                    const res = await fetchWithTimeout(`\( {SERVER_URL}/api/suggest?q= \){encodeURIComponent(val)}`);
+                    const res = await fetchWithTimeout(`${SERVER_URL}/api/suggest?q=${encodeURIComponent(val)}`);
                     const suggestions = await res.json();
                     
                     if (suggestions.length > 0) {
@@ -1555,21 +1557,17 @@
             if (isUrl(query)) {
                 selectVideo(query, "অনলাইন ভিডিও লিঙ্ক", "https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=500", true);
             } else {
-                // ইউটিউবের মতো হেডার সার্চ মোড অন
                 document.getElementById('appHeaderDefault').style.display = 'none';
                 const sHeader = document.getElementById('appHeaderSearchMode');
                 sHeader.style.display = 'flex';
                 document.getElementById('headerSearchInput').value = query;
 
-                // সাজেস্টেড ক্লিয়ার করে সার্চ রেজাল্ট পেজ লোড
                 document.getElementById('defaultGridHeader').style.display = 'none';
                 const searchResultHeader = document.getElementById('searchResultHeader');
                 searchResultHeader.style.display = 'flex';
                 document.getElementById('searchResultTitle').innerText = `সার্চ রেজাল্ট: "${query}"`;
                 
-                // হোম ভিউতে নিয়ে যাবে
                 switchMainTab(document.querySelector('.nav-item'), 'home');
-
                 loadTrendingVideos(query);
             }
         }
@@ -1699,7 +1697,7 @@
             }
 
             try {
-                const response = await fetchWithTimeout(`\( {SERVER_URL}/api/search?q= \){encodeURIComponent(query)}`);
+                const response = await fetchWithTimeout(`${SERVER_URL}/api/search?q=${encodeURIComponent(query)}`);
                 const data = await response.json();
 
                 if (data.results && data.results.length > 0) {
@@ -1749,7 +1747,7 @@
                 const randomKeywords = ['music short', 'fun short', 'funny clip', 'drama scenes', 'natok hit', 'short status'];
                 const randQ = randomKeywords[Math.floor(Math.random() * randomKeywords.length)];
                 
-                const response = await fetchWithTimeout(`\( {SERVER_URL}/api/search?q= \){encodeURIComponent(randQ)}`);
+                const response = await fetchWithTimeout(`${SERVER_URL}/api/search?q=${encodeURIComponent(randQ)}`);
                 const data = await response.json();
 
                 if (data.results && data.results.length > 0) {
@@ -1771,7 +1769,7 @@
                 const randomKeywords = ['new song', 'short video', 'viral clip', 'music clip', 'funny clip'];
                 const randQ = randomKeywords[Math.floor(Math.random() * randomKeywords.length)] + " " + document.getElementById('videoTitle').innerText.split('|')[0].trim();
                 
-                const response = await fetchWithTimeout(`\( {SERVER_URL}/api/search?q= \){encodeURIComponent(randQ)}`);
+                const response = await fetchWithTimeout(`${SERVER_URL}/api/search?q=${encodeURIComponent(randQ)}`);
                 const data = await response.json();
 
                 if (data.results && data.results.length > 0) {
@@ -2026,7 +2024,7 @@
 
             let streamUrl = url;
             if (!url.startsWith('blob:') && !url.includes('/videos/')) {
-                streamUrl = `\( {SERVER_URL}/api/stream?url= \){encodeURIComponent(url)}&quality=${currentQuality}`;
+                streamUrl = `${SERVER_URL}/api/stream?url=${encodeURIComponent(url)}&quality=${currentQuality}`;
             }
 
             resetDownloadBtnState();
@@ -2065,7 +2063,7 @@
         async function fetchSuggestedVideos(title) {
             try {
                 const cleanedQuery = cleanSearchQuery(title); 
-                const sRes = await fetchWithTimeout(`\( {SERVER_URL}/api/search?q= \){encodeURIComponent(cleanedQuery)}`);
+                const sRes = await fetchWithTimeout(`${SERVER_URL}/api/search?q=${encodeURIComponent(cleanedQuery)}`);
                 const sData = await sRes.json();
                 if (sData.results && sData.results.length > 0) {
                     renderSuggestedGridInPlayer(sData.results);
@@ -2099,7 +2097,6 @@
 
             playerSection.addEventListener('touchstart', (e) => {
                 if (playerState !== 'minimized') return;
-                // ক্লোজ বাটনে টাচ করলে ড্র্যাগ ইভেন্ট বন্ধ থাকবে
                 if (e.target.closest('#miniCloseBtn')) {
                     return;
                 }
@@ -2129,7 +2126,6 @@
 
             playerSection.addEventListener('touchend', (e) => {
                 isDraggingMini = false;
-                // ক্লোজ বাটনে ক্লিক করলে প্লেয়ার প্রসারিত হবে না
                 if (e.target.closest('#miniCloseBtn')) {
                     return;
                 }
@@ -2157,6 +2153,7 @@
             }
         }
 
+        // CC এবং Cast
         function triggerCast() {
             alert("কাস্টিং ডিভাইস খোঁজা হচ্ছে... অনুগ্রহ করে ওয়াইফাই কানেকশনটি চেক করুন।");
         }
@@ -2181,7 +2178,7 @@
 
             let streamUrl = currentUrl;
             if (!currentUrl.startsWith('blob:') && !currentUrl.includes('/videos/')) {
-                streamUrl = `\( {SERVER_URL}/api/stream?url= \){encodeURIComponent(currentUrl)}&quality=${quality}`;
+                streamUrl = `${SERVER_URL}/api/stream?url=${encodeURIComponent(currentUrl)}&quality=${quality}`;
             }
 
             player.src = streamUrl;
@@ -2202,7 +2199,7 @@
                     return {
                         title: file.name,
                         url: localBlobUrl,
-                        id: `gallery_\( {Date.now()}_ \){index}`,
+                        id: `gallery_${Date.now()}_${index}`,
                         isGallery: true
                     };
                 });
@@ -2217,9 +2214,7 @@
             }, 500);
         }
 
-        // ==========================================
-        // প্লেয়ার কন্ট্রোলস, টেনে কাটা ও ডাবল টাচ জেসচার
-        // ==========================================
+        // Custom Player Controls
         function setupCustomPlayerControls() {
             const playPauseBtn = document.getElementById('playPauseBtn');
             const fullscreenBtn = document.getElementById('fullscreenBtn');
@@ -2279,7 +2274,6 @@
                 resetControlsTimeout();
             }
 
-            // স্পর্শ টাইমলাইন স্ক্রাবিং (YouTube Style - টানার সময় ভিডিও আটকাবে না)
             progressBarContainer.addEventListener('mousedown', startDrag);
             progressBarContainer.addEventListener('touchstart', startDrag);
 
@@ -2312,11 +2306,10 @@
                 if (percent < 0) percent = 0;
                 if (percent > 1) percent = 1;
                 
-                dragPercent = percent; // স্ক্রাব পজিশন সেভ
+                dragPercent = percent; 
                 progressBarInner.style.width = `${percent * 100}%`;
                 
                 const duration = player.duration || 0;
-                // টানার সময় ভিডিও আটকানো এড়াতে কেবল টেক্সট পরিবর্তন হবে
                 timeDisplay.innerText = `${formatSecs(percent * duration)} / ${formatSecs(duration)}`;
             }
 
@@ -2330,7 +2323,6 @@
                 
                 const duration = player.duration || 0;
                 if (duration) {
-                    // হাত ছেড়ে দেওয়ার সাথে সাথে কাঙ্ক্ষিত সেকেন্ডে নিয়ে যাবে (ইউটিউব এর মতো)
                     player.currentTime = dragPercent * duration; 
                 }
                 resetControlsTimeout(); 
@@ -2390,9 +2382,9 @@
             const m = Math.floor((seconds % 3600) / 60);
             const s = Math.floor(seconds % 60);
             if (h > 0) {
-                return `\( {h}: \){m < 10 ? '0' : ''}\( {m}: \){s < 10 ? '0' : ''}${s}`;
+                return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
             }
-            return `\( {m}: \){s < 10 ? '0' : ''}${s}`;
+            return `${m}:${s < 10 ? '0' : ''}${s}`;
         }
 
         function updatePlayPauseUI(isPlaying) {
@@ -2400,7 +2392,6 @@
             playPauseBtn.innerHTML = isPlaying ? `<i class="fa-solid fa-pause"></i>` : `<i class="fa-solid fa-play"></i>`;
         }
 
-        // ৩ সেকেন্ড পর কন্ট্রোল বার লুকাতে রিসেট ফাংশন
         function resetControlsTimeout() {
             clearTimeout(controlsTimeout);
             videoContainer.classList.add('show-controls');
@@ -2429,7 +2420,7 @@
         }
 
         // ==========================================
-        // ডাউনলোড লজিক কানেকশন
+        // ডাউনলোড প্রসেস লজিক (গ্যালারি পুশ কানেকশন)
         // ==========================================
         function resetDownloadBtnState() {
             if (activeDownloadPoll) clearInterval(activeDownloadPoll);
@@ -2449,7 +2440,7 @@
             const currentTitle = document.getElementById('videoTitle').innerText;
             const currentThumbnail = document.getElementById('videoThumb').src;
 
-            fetch(`\( {SERVER_URL}/api/download-start?url= \){encodeURIComponent(currentUrl)}&quality=\( {quality}&title= \){encodeURIComponent(currentTitle)}&thumbnail=${encodeURIComponent(currentThumbnail)}`)
+            fetch(`${SERVER_URL}/api/download-start?url=${encodeURIComponent(currentUrl)}&quality=${quality}&title=${encodeURIComponent(currentTitle)}&thumbnail=${encodeURIComponent(currentThumbnail)}`)
                 .then(res => res.json())
                 .then(data => {
                     if (data.downloadId) {
@@ -2469,21 +2460,30 @@
             if (activeDownloadPoll) clearInterval(activeDownloadPoll);
             
             activeDownloadPoll = setInterval(() => {
-                fetch(`\( {SERVER_URL}/api/download-status?id= \){downloadId}`)
+                fetch(`${SERVER_URL}/api/download-status?id=${downloadId}`)
                     .then(res => res.json())
                     .then(data => {
                         if (data.status === 'downloading') {
                             const percent = data.percent || 0;
                             const offset = circleCircumference - (percent / 100) * circleCircumference;
                             downloadProgressCircle.style.strokeDashoffset = offset;
-                            circularProgressText.innerText = `\( {percent}% ( \){data.totalSize}) • গতি: ${data.speed}`;
+                            circularProgressText.innerText = `${percent}% (${data.totalSize}) • গতি: ${data.speed}`;
                         } else if (data.status === 'completed') {
                             clearInterval(activeDownloadPoll);
                             downloadProgressCircle.style.strokeDashoffset = 0;
                             downloadBtnContent.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #22c55e;"></i>`;
-                            circularProgressText.innerText = 'ডাউনলোড সম্পন্ন হয়েছে!';
+                            circularProgressText.innerText = 'ডাউনলোড সম্পন্ন! আপনার গ্যালারিতে সেভ হচ্ছে...';
                             
-                            const localVideoUrl = `\( {SERVER_URL}/videos/ \){data.fileName}`;
+                            // সার্ভার থেকে সরাসরি ব্রাউজারের মাধ্যমে মোবাইলের গ্যালারিতে ভিডিও ফাইলটি নামানোর অটোমেটিক ট্রিগার
+                            const localVideoUrl = `${SERVER_URL}/api/get-file?file=${encodeURIComponent(data.fileName)}`;
+                            
+                            const downloadLink = document.createElement('a');
+                            downloadLink.href = localVideoUrl;
+                            downloadLink.setAttribute('download', data.fileName);
+                            document.body.appendChild(downloadLink);
+                            downloadLink.click();
+                            document.body.removeChild(downloadLink);
+
                             saveToOfflineDownloads(document.getElementById('videoTitle').innerText, localVideoUrl);
                             updateDownloadBadge();
                         } else if (data.status === 'failed') {
@@ -2531,7 +2531,7 @@
                     const card = document.createElement('div');
                     card.className = 'video-card';
                     
-                    const isLocalPath = video.url.includes('/videos/');
+                    const isLocalPath = video.url.includes('/api/get-file?file=') || video.url.includes('/videos/');
                     const badgeText = video.isGallery ? 'Gallery Video' : (isLocalPath ? 'Termux Offline' : 'Offline Entry');
                     const thumbImg = (video.isGallery || isLocalPath) ? 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=500' : `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`;
                     
@@ -2541,7 +2541,7 @@
                         <div class="card-thumb-container">
                             <img src="${thumbImg}" class="card-thumb-img">
                             <span class="card-duration">${badgeText}</span>
-                            <button class="card-menu-btn" onclick="toggleCardMenu(event, '\( {video.url}', ' \){video.title.replace(/'/g, "\\'")}', '${thumbImg}')">
+                            <button class="card-menu-btn" onclick="toggleCardMenu(event, '${video.url}', '${video.title.replace(/'/g, "\\'")}', '${thumbImg}')">
                                 <i class="fa-solid fa-ellipsis-vertical"></i>
                             </button>
                         </div>
@@ -2601,3 +2601,4 @@
     </script>
 </body>
 </html>
+```
