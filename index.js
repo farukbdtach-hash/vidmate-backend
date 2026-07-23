@@ -6,8 +6,7 @@ const https = require('https');
 const os = require('os');
 
 const app = express();
-// Render-এর ডায়নামিক পোর্টের জন্য কনফিগারেশন
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 // অ্যান্ড্রয়েড পাবলিক ডাউনলোড ফোল্ডার অ্যাক্সেস করার পাথ নির্ধারণ
 const homeDir = os.homedir();
@@ -35,16 +34,11 @@ if (!fs.existsSync(downloadsDir)) {
 }
 
 const downloadsInProgress = {};
-const streamCache = {}; 
+const streamCache = {}; // এক্সট্র্যাক্ট করা স্ট্রিমিং লিঙ্ক ক্যাশ
 
-const keepAliveAgent = new https.Agent({
-    keepAlive: true,
-    maxSockets: 300,
-    keepAliveMsecs: 15000
-});
-
-// গ্লোবাল বা লোকাল yt-dlp ট্র্যাক করার ভ্যারিয়েবল
-let YTDLP_PATH = 'yt-dlp';
+// ব্যাকগ্রাউন্ড প্রি-ফেচ কিউ (ফোন অতিরিক্ত ল্যাগ হওয়া থেকে রক্ষা করতে)
+let prefetchQueue = [];
+let isPrefetching = false;
 
 // ফাইল সিস্টেম ব্রেকিং ক্যারেক্টার ক্লিন করার ফাংশন
 function sanitizeFilename(title) {
@@ -71,67 +65,92 @@ function downloadThumbnail(url, destPath) {
     });
 }
 
-// Render-এর মতো ক্লাউড সার্ভারে yt-dlp অটো-ডাউনলোড করার ফাংশন
-function downloadFile(url, destPath) {
+// yt-dlp থেকে সরাসরি এবং অত্যন্ত দ্রুত স্ট্রিমিং লিঙ্ক এক্সট্র্যাক্ট করার কোর হেল্পার
+function getDirectStreamUrl(videoUrl, quality) {
     return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(destPath);
-        function get(targetUrl) {
-            https.get(targetUrl, (response) => {
-                if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-                    get(response.headers.location);
-                } else if (response.statusCode === 200) {
-                    response.pipe(file);
-                    file.on('finish', () => {
-                        file.close(resolve);
-                    });
-                } else {
-                    reject(new Error(`Status code: ${response.statusCode}`));
-                }
-            }).on('error', (err) => {
-                fs.unlink(destPath, () => {});
-                reject(err);
-            });
-        }
-        get(url);
-    });
-}
+        let format = '18/best[ext=mp4]/best';
+        if (quality === '1080p') format = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best';
+        if (quality === '720p') format = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best';
+        if (quality === '480p') format = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best';
+        if (quality === '360p') format = '18/best[height<=360][ext=mp4]/best';
 
-// yt-dlp ইনস্টলেশন ও রানটাইম নিশ্চিত করার ফাংশন
-function checkYtdlp() {
-    return new Promise((resolve) => {
-        exec('yt-dlp --version', (err) => {
-            if (err) {
-                const localBinDir = path.join(__dirname, 'bin');
-                const localYtDlp = path.join(localBinDir, 'yt-dlp');
-                
-                if (fs.existsSync(localYtDlp)) {
-                    YTDLP_PATH = localYtDlp;
-                    resolve();
-                } else {
-                    if (!fs.existsSync(localBinDir)) {
-                        fs.mkdirSync(localBinDir, { recursive: true });
-                    }
-                    console.log("Render/Linux এনভায়রনমেন্ট শনাক্ত হয়েছে। yt-dlp বাইনারি ডাউনলোড হচ্ছে...");
-                    const downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
-                    
-                    downloadFile(downloadUrl, localYtDlp)
-                        .then(() => {
-                            fs.chmodSync(localYtDlp, 0o755); // এক্সিকিউটেবল পারমিশন দেওয়া হলো
-                            YTDLP_PATH = localYtDlp;
-                            console.log("yt-dlp বাইনারি ডাউনলোড ও সেটআপ সম্পন্ন হয়েছে!");
-                            resolve();
-                        })
-                        .catch((downloadErr) => {
-                            console.error("yt-dlp ডাউনলোড করতে ব্যর্থ:", downloadErr);
-                            resolve(); 
-                        });
-                }
+        // সুপার-ফাস্ট প্যারামিটার (কনফিগ ফাইল এবং ভারী ম্যানিফেস্ট স্কিপ করা হয়েছে)
+        const ytDlp = spawn('yt-dlp', [
+            '-f', format, 
+            '--no-playlist', 
+            '--no-warnings', 
+            '--ignore-errors', 
+            '--no-config',                    // টার্মিনাল কনফিগ লোড স্কিপ করবে
+            '--no-check-certificate',          // SSL চেক বাইপাস করে কানেকশন দ্রুত করবে
+            '--youtube-skip-dash-manifest',    // DASH ম্যানিফেস্ট প্রসেসিং স্কিপ
+            '--youtube-skip-hls-manifest',     // HLS ম্যানিফেস্ট প্রসেসিং স্কিপ
+            '--extractor-args', 'youtube:player_client=default,-android_sdkless',
+            '-g', 
+            videoUrl
+        ]);
+
+        let stdout = '';
+        let stderr = '';
+
+        ytDlp.stdout.on('data', (data) => stdout += data.toString());
+        ytDlp.stderr.on('data', (data) => stderr += data.toString());
+
+        ytDlp.on('close', (code) => {
+            if (code === 0 && stdout.trim()) {
+                const streamDirectUrl = stdout.trim().split('\n')[0];
+                resolve(streamDirectUrl);
             } else {
-                console.log("সিস্টেমের গ্লোবাল yt-dlp ব্যবহার করা হচ্ছে।");
-                resolve();
+                reject(new Error(stderr || 'Streaming extraction failed'));
             }
         });
     });
+}
+
+// সিকুয়েনশিয়াল ব্যাকগ্রাউন্ড প্রি-ফেচিং রানার (মোবাইলের চার্জ ও র‍্যাম সুরক্ষিত রাখবে)
+async function processPrefetchQueue() {
+    if (isPrefetching || prefetchQueue.length === 0) return;
+    isPrefetching = true;
+
+    while (prefetchQueue.length > 0) {
+        const item = prefetchQueue.shift();
+        const cacheKey = `${item.url}_${item.quality}`;
+
+        if (streamCache[cacheKey] && streamCache[cacheKey].expiry > Date.now()) {
+            continue; // ইতোমধ্যে ক্যাশে থাকলে স্কিপ করবে
+        }
+
+        try {
+            console.log(`[Prefetching Video Link]: ${item.title.substring(0, 30)}...`);
+            const directUrl = await getDirectStreamUrl(item.url, item.quality);
+            if (directUrl) {
+                streamCache[cacheKey] = {
+                    directUrl: directUrl,
+                    expiry: Date.now() + (1000 * 60 * 60 * 3) // ৩ ঘণ্টার জন্য মেমোরিতে থাকবে
+                };
+                console.log(`[Prefetched & Cached Successfully]: ${item.title.substring(0, 30)}`);
+            }
+        } catch (e) {
+            console.log(`[Prefetch Ignored]: ${item.title.substring(0, 20)} - ${e.message}`);
+        }
+
+        // সিকিউরিটি বাফার পজ (যাতে টার্মিনাল ল্যাগ না করে)
+        await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+
+    isPrefetching = false;
+}
+
+// প্রি-ফেচ তালিকায় সার্চের ভিডিওগুলো যুক্ত করার ফাংশন
+function triggerPrefetch(videos) {
+    // শুধুমাত্র প্রথম ৪টি রেজাল্ট প্রি-ফেচ তালিকায় যুক্ত করা হবে (সবচেয়ে বেশি ক্লিক হওয়ার সম্ভাবনা যেগুলোতে থাকে)
+    videos.forEach(video => {
+        prefetchQueue.push({
+            url: video.url,
+            title: video.title,
+            quality: '360p' // ডিফল্ট হোম প্লেব্যাক কোয়ালিটি
+        });
+    });
+    processPrefetchQueue();
 }
 
 app.use((req, res, next) => {
@@ -180,6 +199,11 @@ app.get('/api/search', async (req, res) => {
     try {
         const results = await searchYouTube(q);
         res.json({ results });
+
+        // ব্যাকগ্রাউন্ডে গোপনে প্রথম ৩-৪টি ভিডিওর লিঙ্ক ক্যাশ করা শুরু করবে
+        if (results && results.length > 0) {
+            triggerPrefetch(results.slice(0, 4));
+        }
     } catch (e) {
         console.error("Search error:", e);
         res.status(500).json({ error: "Search failed", results: [] });
@@ -191,19 +215,14 @@ app.get('/api/info', (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).json({ error: 'URL is required' });
 
-    const args = [
+    const ytDlp = spawn('yt-dlp', [
         '-j', 
-        '--extractor-args', 'youtube:player_client=android,web',
+        '--no-playlist',
+        '--no-config',
+        '--no-check-certificate',
+        '--extractor-args', 'youtube:player_client=default,-android_sdkless',
         videoUrl
-    ];
-
-    // কুকিজ ফাইল থাকলে স্বয়ংক্রিয়ভাবে যোগ করা হবে
-    const cookiesPath = path.join(__dirname, 'cookies.txt');
-    if (fs.existsSync(cookiesPath)) {
-        args.push('--cookies', cookiesPath);
-    }
-
-    const ytDlp = spawn(YTDLP_PATH, args);
+    ]);
     let stdout = '';
     
     ytDlp.stdout.on('data', (data) => stdout += data.toString());
@@ -233,104 +252,35 @@ function formatDuration(sec) {
     return `${m}:${s}`;
 }
 
-// ৪. ক্যাশ মেমোরি নিয়ন্ত্রিত হাই-স্পীড রেঞ্জ প্রক্সি স্ট্রিম (প্লেব্যাক ও কাটা-কাটি ফিক্স)
+// ৪. ক্যাশ মেমোরি নিয়ন্ত্রিত হাই-স্পীড প্লেব্যাক স্ট্রিম
 app.get('/api/stream', async (req, res) => {
     const videoUrl = req.query.url;
     const quality = req.query.quality || '360p';
     if (!videoUrl) return res.status(400).send('URL is required');
 
     const cacheKey = `${videoUrl}_${quality}`;
-    let directUrl = '';
-
+    
+    // ক্যাশ চেক (যদি ভিডিও আগে ব্যাকগ্রাউন্ডে প্রি-ফেচ হয়ে থাকে, তবে এটি ইনস্ট্যান্টলি প্লে হবে)
     if (streamCache[cacheKey] && streamCache[cacheKey].expiry > Date.now()) {
-        directUrl = streamCache[cacheKey].directUrl;
-    } else {
-        try {
-            let format = '18/best[ext=mp4]/best';
-            if (quality === '1080p') format = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best';
-            if (quality === '720p') format = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best';
-            if (quality === '480p') format = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best';
-            if (quality === '360p') format = '18/best[height<=360][ext=mp4]/best';
-
-            const args = [
-                '-f', format, 
-                '--no-playlist', 
-                '--no-warnings', 
-                '--ignore-errors', 
-                '--extractor-args', 'youtube:player_client=android,web',
-                '-g', 
-                videoUrl
-            ];
-
-            const cookiesPath = path.join(__dirname, 'cookies.txt');
-            if (fs.existsSync(cookiesPath)) {
-                args.push('--cookies', cookiesPath);
-            }
-
-            directUrl = await getDirectUrlWithArgs(args);
-            streamCache[cacheKey] = {
-                directUrl: directUrl,
-                expiry: Date.now() + (1000 * 60 * 60) 
-            };
-        } catch (err) {
-            return res.status(500).send('Streaming resolution failed: ' + err.message);
-        }
+        console.log(`[Cache Hit] Serving video link instantly for: ${videoUrl}`);
+        return res.redirect(302, streamCache[cacheKey].directUrl);
     }
 
-    // রেঞ্জ রিকোয়েস্ট ও আইপি লক বাইপাস করতে হাই-স্পিড সার্ভার প্রক্সি
+    // ক্যাশ মিস হলে অন-ডিমান্ড দ্রুত স্ট্রিমিং লিঙ্ক এক্সট্র্যাক্ট করবে
     try {
-        const parsedUrl = new URL(directUrl);
-        const headers = {};
+        console.log(`[Cache Miss] Fetching link on-demand: ${videoUrl}`);
+        const streamDirectUrl = await getDirectStreamUrl(videoUrl, quality);
         
-        if (req.headers.range) {
-            headers['Range'] = req.headers.range;
-        }
-        headers['User-Agent'] = req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
-
-        const options = {
-            hostname: parsedUrl.hostname,
-            port: parsedUrl.port || 443,
-            path: parsedUrl.pathname + parsedUrl.search,
-            method: 'GET',
-            headers: headers
+        streamCache[cacheKey] = {
+            directUrl: streamDirectUrl,
+            expiry: Date.now() + (1000 * 60 * 60 * 3) // ৩ ঘণ্টা ক্যাশ
         };
 
-        const proxyReq = https.request(options, (proxyRes) => {
-            res.writeHead(proxyRes.statusCode, proxyRes.headers);
-            proxyRes.pipe(res);
-        });
-
-        proxyReq.on('error', (e) => {
-            console.error('Proxy request error:', e);
-            if (!res.headersSent) res.sendStatus(500);
-        });
-
-        req.on('close', () => {
-            proxyReq.destroy();
-        });
-
-        proxyReq.end();
-    } catch (e) {
-        if (!res.headersSent) res.status(500).send('Proxy stream failed');
+        res.redirect(302, streamDirectUrl);
+    } catch (err) {
+        res.status(500).send('Streaming failed: ' + err.message);
     }
 });
-
-function getDirectUrlWithArgs(args) {
-    return new Promise((resolve, reject) => {
-        const ytDlp = spawn(YTDLP_PATH, args);
-        let stdout = '';
-        let stderr = '';
-        ytDlp.stdout.on('data', d => stdout += d.toString());
-        ytDlp.stderr.on('data', d => stderr += d.toString());
-        ytDlp.on('close', (code) => {
-            if (code === 0 && stdout.trim()) {
-                resolve(stdout.trim().split('\n')[0]);
-            } else {
-                reject(new Error(stderr || 'yt-dlp stream resolution returned empty'));
-            }
-        });
-    });
-}
 
 // ৫. ভিডিওর আসল নাম এবং নোটিফিকেশন সমৃদ্ধ প্রসেস ডাউনলোড এপিআই
 app.get('/api/download-start', async (req, res) => {
@@ -361,8 +311,14 @@ app.get('/api/download-start', async (req, res) => {
 
     const ext = (quality === 'audio' || quality === 'audio_high') ? 'm4a' : 'mp4';
     
-    // ভিডিওর আসল টাইটেল যুক্ত করে ফোল্ডার পাথ তৈরি
-    const outputTemplate = path.join(downloadsDir, `${safeTitle}.${ext}`);
+    // ডুপ্লিকেট ডাউনলোড প্রতিরোধ চেক
+    let downloadedFileName = `${safeTitle}.${ext}`;
+    let outputTemplate = path.join(downloadsDir, downloadedFileName);
+    if (fs.existsSync(outputTemplate)) {
+        const uniqueSuffix = Math.floor(Date.now() / 1000);
+        downloadedFileName = `${safeTitle}_${uniqueSuffix}.${ext}`;
+        outputTemplate = path.join(downloadsDir, downloadedFileName);
+    }
 
     // নোটিফিকেশনের থাম্বনেইল ডাউনলোড করার জন্য ব্যাকগ্রাউন্ড পাথ প্রিপারেশন
     const cachedThumbPath = path.join(downloadsDir, `${safeTitle}_thumb.jpg`);
@@ -372,17 +328,11 @@ app.get('/api/download-start', async (req, res) => {
 
     const args = [
         '-f', format, 
-        '--extractor-args', 'youtube:player_client=android,web',
+        '--extractor-args', 'youtube:player_client=default,-android_sdkless',
         '-o', outputTemplate, 
         videoUrl
     ];
-
-    const cookiesPath = path.join(__dirname, 'cookies.txt');
-    if (fs.existsSync(cookiesPath)) {
-        args.push('--cookies', cookiesPath);
-    }
-
-    const ytDlp = spawn(YTDLP_PATH, args);
+    const ytDlp = spawn('yt-dlp', args);
 
     downloadsInProgress[downloadId].process = ytDlp;
 
@@ -398,30 +348,22 @@ app.get('/api/download-start', async (req, res) => {
 
     ytDlp.on('close', (code) => {
         if (code === 0) {
-            const downloadedFileName = `${safeTitle}.${ext}`;
             downloadsInProgress[downloadId].status = 'completed';
             downloadsInProgress[downloadId].fileName = downloadedFileName;
 
-            // শুধুমাত্র অ্যান্ড্রয়েড/টার্মাক্স ডিভাইসে থাকলে গ্যালারি স্ক্যানার ও নোটিফিকেশন রান করবে
-            const isAndroid = downloadsDir.includes('shared') || downloadsDir.includes('sdcard');
-            
-            if (isAndroid) {
-                const fullPath = path.join(downloadsDir, downloadedFileName);
-                exec(`termux-media-scan "${fullPath}"`, (scanErr) => {
-                    if (scanErr) console.log("termux-media-scan failed or not installed:", scanErr);
-                });
+            // গ্যালারিতে ভিডিও রিফ্রেশ করার মিডিয়া স্ক্যানার রান
+            exec(`termux-media-scan "${outputTemplate}"`, (scanErr) => {
+                if (scanErr) console.log("termux-media-scan failed or not installed:", scanErr);
+            });
 
-                // নোটিফিকেশন প্রদর্শন
-                let notificationCmd = `termux-notification --title "Minitube ডাউনলোড সম্পন্ন" --content "${safeTitle}" --id "${downloadId}"`;
-                if (fs.existsSync(cachedThumbPath)) {
-                    notificationCmd += ` --image-path "${cachedThumbPath}"`;
-                }
-                exec(notificationCmd, (notifErr) => {
-                    if (notifErr) console.log("termux-api notification error:", notifErr);
-                });
-            } else {
-                console.log(`ডাউনলোড সম্পন্ন হয়েছে (ক্লাউড সার্ভার): ${downloadedFileName}`);
+            // নোটিফিকেশন প্রদর্শন
+            let notificationCmd = `termux-notification --title "Minitube ডাউনলোড সম্পন্ন" --content "${safeTitle}" --id "${downloadId}"`;
+            if (fs.existsSync(cachedThumbPath)) {
+                notificationCmd += ` --image-path "${cachedThumbPath}"`;
             }
+            exec(notificationCmd, (notifErr) => {
+                if (notifErr) console.log("termux-api notification error:", notifErr);
+            });
 
         } else {
             downloadsInProgress[downloadId].status = 'failed';
@@ -462,24 +404,19 @@ app.get('/api/get-file', (req, res) => {
     }
 });
 
-// yt-dlp সার্চ মেথড
+// yt-dlp সার্চ মেথড (অপ্টিমাইজড স্পীড প্যারামিটার সহ)
 function searchYouTube(query) {
     return new Promise((resolve, reject) => {
-        const args = [
+        const ytDlp = spawn('yt-dlp', [
             `ytsearch20:${query}`,
             '--flat-playlist',
             '--dump-single-json',
             '--no-warnings',
             '--ignore-errors',
-            '--extractor-args', 'youtube:player_client=android,web'
-        ];
-
-        const cookiesPath = path.join(__dirname, 'cookies.txt');
-        if (fs.existsSync(cookiesPath)) {
-            args.push('--cookies', cookiesPath);
-        }
-
-        const ytDlp = spawn(YTDLP_PATH, args);
+            '--no-config',                     // কনফিগ স্কিপ
+            '--no-check-certificate',           // SSL চেক স্কিপ
+            '--extractor-args', 'youtube:player_client=default,-android_sdkless'
+        ]);
 
         let stdout = '';
         let stderr = '';
@@ -538,19 +475,16 @@ function getLocalIpAddress() {
     return null;
 }
 
-// প্রথমে yt-dlp এনভায়রনমেন্ট চেক বা ডাউনলোড করা হবে, তারপর সার্ভার লিসেন করবে
-checkYtdlp().then(() => {
-    app.listen(PORT, () => {
-        const localIp = getLocalIpAddress();
-        console.log("====================================================");
-        console.log("🚀 সার্ভার সফলভাবে চালু হয়েছে!");
-        console.log("💻 লোকাল: http://localhost:" + PORT);
-        console.log("📂 ডাউনলোড পাথ: " + downloadsDir);
-        if (localIp) {
-            console.log("📱 মোবাইল: http://" + localIp + ":" + PORT);
-        } else {
-            console.log("📱 মোবাইল: (ওয়াইফাই ডিসকানেক্টেড/ক্লাউড রান)");
-        }
-        console.log("====================================================");
-    });
+app.listen(PORT, () => {
+    const localIp = getLocalIpAddress();
+    console.log("====================================================");
+    console.log("🚀 অপ্টিমাইজড স্ট্রিমিং সার্ভার সফলভাবে চালু হয়েছে!");
+    console.log("💻 লোকাল: http://localhost:" + PORT);
+    console.log("📂 ডাউনলোড পাথ: " + downloadsDir);
+    if (localIp) {
+        console.log("📱 মোবাইল: http://" + localIp + ":" + PORT);
+    } else {
+        console.log("📱 মোবাইল: (ওয়াইফাই ডিসকানেক্টেড)");
+    }
+    console.log("====================================================");
 });
