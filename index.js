@@ -6,7 +6,8 @@ const https = require('https');
 const os = require('os');
 
 const app = express();
-const PORT = 3000;
+// Render-এর ডায়নামিক পোর্টের জন্য কনফিগারেশন
+const PORT = process.env.PORT || 3000;
 
 // অ্যান্ড্রয়েড পাবলিক ডাউনলোড ফোল্ডার অ্যাক্সেস করার পাথ নির্ধারণ
 const homeDir = os.homedir();
@@ -42,6 +43,9 @@ const keepAliveAgent = new https.Agent({
     keepAliveMsecs: 15000
 });
 
+// গ্লোবাল বা লোকাল yt-dlp ট্র্যাক করার ভ্যারিয়েবল
+let YTDLP_PATH = 'yt-dlp';
+
 // ফাইল সিস্টেম ব্রেকিং ক্যারেক্টার ক্লিন করার ফাংশন
 function sanitizeFilename(title) {
     if (!title) return 'video_' + Date.now();
@@ -63,6 +67,69 @@ function downloadThumbnail(url, destPath) {
         }).on('error', (err) => {
             fs.unlink(destPath, () => {}); 
             reject(err);
+        });
+    });
+}
+
+// Render-এর মতো ক্লাউড সার্ভারে yt-dlp অটো-ডাউনলোড করার ফাংশন
+function downloadFile(url, destPath) {
+    return new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(destPath);
+        function get(targetUrl) {
+            https.get(targetUrl, (response) => {
+                if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                    get(response.headers.location);
+                } else if (response.statusCode === 200) {
+                    response.pipe(file);
+                    file.on('finish', () => {
+                        file.close(resolve);
+                    });
+                } else {
+                    reject(new Error(`Status code: ${response.statusCode}`));
+                }
+            }).on('error', (err) => {
+                fs.unlink(destPath, () => {});
+                reject(err);
+            });
+        }
+        get(url);
+    });
+}
+
+// yt-dlp ইনস্টলেশন ও রানটাইম নিশ্চিত করার ফাংশন
+function checkYtdlp() {
+    return new Promise((resolve) => {
+        exec('yt-dlp --version', (err) => {
+            if (err) {
+                const localBinDir = path.join(__dirname, 'bin');
+                const localYtDlp = path.join(localBinDir, 'yt-dlp');
+                
+                if (fs.existsSync(localYtDlp)) {
+                    YTDLP_PATH = localYtDlp;
+                    resolve();
+                } else {
+                    if (!fs.existsSync(localBinDir)) {
+                        fs.mkdirSync(localBinDir, { recursive: true });
+                    }
+                    console.log("Render/Linux এনভায়রনমেন্ট শনাক্ত হয়েছে। yt-dlp বাইনারি ডাউনলোড হচ্ছে...");
+                    const downloadUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+                    
+                    downloadFile(downloadUrl, localYtDlp)
+                        .then(() => {
+                            fs.chmodSync(localYtDlp, 0o755); // এক্সিকিউটেবল পারমিশন দেওয়া হলো
+                            YTDLP_PATH = localYtDlp;
+                            console.log("yt-dlp বাইনারি ডাউনলোড ও সেটআপ সম্পন্ন হয়েছে!");
+                            resolve();
+                        })
+                        .catch((downloadErr) => {
+                            console.error("yt-dlp ডাউনলোড করতে ব্যর্থ:", downloadErr);
+                            resolve(); 
+                        });
+                }
+            } else {
+                console.log("সিস্টেমের গ্লোবাল yt-dlp ব্যবহার করা হচ্ছে।");
+                resolve();
+            }
         });
     });
 }
@@ -124,11 +191,19 @@ app.get('/api/info', (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).json({ error: 'URL is required' });
 
-    const ytDlp = spawn('yt-dlp', [
+    const args = [
         '-j', 
-        '--extractor-args', 'youtube:player_client=default,-android_sdkless',
+        '--extractor-args', 'youtube:player_client=android,web',
         videoUrl
-    ]);
+    ];
+
+    // কুকিজ ফাইল থাকলে স্বয়ংক্রিয়ভাবে যোগ করা হবে
+    const cookiesPath = path.join(__dirname, 'cookies.txt');
+    if (fs.existsSync(cookiesPath)) {
+        args.push('--cookies', cookiesPath);
+    }
+
+    const ytDlp = spawn(YTDLP_PATH, args);
     let stdout = '';
     
     ytDlp.stdout.on('data', (data) => stdout += data.toString());
@@ -158,54 +233,104 @@ function formatDuration(sec) {
     return `${m}:${s}`;
 }
 
-// ৪. ক্যাশ মেমোরি নিয়ন্ত্রিত হাই-স্পীড প্লেব্যাক স্ট্রিম
-app.get('/api/stream', (req, res) => {
+// ৪. ক্যাশ মেমোরি নিয়ন্ত্রিত হাই-স্পীড রেঞ্জ প্রক্সি স্ট্রিম (প্লেব্যাক ও কাটা-কাটি ফিক্স)
+app.get('/api/stream', async (req, res) => {
     const videoUrl = req.query.url;
     const quality = req.query.quality || '360p';
     if (!videoUrl) return res.status(400).send('URL is required');
 
     const cacheKey = `${videoUrl}_${quality}`;
+    let directUrl = '';
+
     if (streamCache[cacheKey] && streamCache[cacheKey].expiry > Date.now()) {
-        return res.redirect(302, streamCache[cacheKey].directUrl);
-    }
+        directUrl = streamCache[cacheKey].directUrl;
+    } else {
+        try {
+            let format = '18/best[ext=mp4]/best';
+            if (quality === '1080p') format = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best';
+            if (quality === '720p') format = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best';
+            if (quality === '480p') format = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best';
+            if (quality === '360p') format = '18/best[height<=360][ext=mp4]/best';
 
-    let format = '18/best[ext=mp4]/best';
-    if (quality === '1080p') format = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best';
-    if (quality === '720p') format = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best';
-    if (quality === '480p') format = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best';
-    if (quality === '360p') format = '18/best[height<=360][ext=mp4]/best';
+            const args = [
+                '-f', format, 
+                '--no-playlist', 
+                '--no-warnings', 
+                '--ignore-errors', 
+                '--extractor-args', 'youtube:player_client=android,web',
+                '-g', 
+                videoUrl
+            ];
 
-    const ytDlp = spawn('yt-dlp', [
-        '-f', format, 
-        '--no-playlist', 
-        '--no-warnings', 
-        '--ignore-errors', 
-        '--extractor-args', 'youtube:player_client=default,-android_sdkless',
-        '-g', 
-        videoUrl
-    ]);
+            const cookiesPath = path.join(__dirname, 'cookies.txt');
+            if (fs.existsSync(cookiesPath)) {
+                args.push('--cookies', cookiesPath);
+            }
 
-    let stdout = '';
-    let stderr = '';
-
-    ytDlp.stdout.on('data', (data) => stdout += data.toString());
-    ytDlp.stderr.on('data', (data) => stderr += data.toString());
-
-    ytDlp.on('close', (code) => {
-        if (code === 0 && stdout.trim()) {
-            const streamDirectUrl = stdout.trim().split('\n')[0];
-            
+            directUrl = await getDirectUrlWithArgs(args);
             streamCache[cacheKey] = {
-                directUrl: streamDirectUrl,
+                directUrl: directUrl,
                 expiry: Date.now() + (1000 * 60 * 60) 
             };
-
-            res.redirect(302, streamDirectUrl);
-        } else {
-            res.status(500).send('Streaming failed: ' + stderr);
+        } catch (err) {
+            return res.status(500).send('Streaming resolution failed: ' + err.message);
         }
-    });
+    }
+
+    // রেঞ্জ রিকোয়েস্ট ও আইপি লক বাইপাস করতে হাই-স্পিড সার্ভার প্রক্সি
+    try {
+        const parsedUrl = new URL(directUrl);
+        const headers = {};
+        
+        if (req.headers.range) {
+            headers['Range'] = req.headers.range;
+        }
+        headers['User-Agent'] = req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
+
+        const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || 443,
+            path: parsedUrl.pathname + parsedUrl.search,
+            method: 'GET',
+            headers: headers
+        };
+
+        const proxyReq = https.request(options, (proxyRes) => {
+            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+            proxyRes.pipe(res);
+        });
+
+        proxyReq.on('error', (e) => {
+            console.error('Proxy request error:', e);
+            if (!res.headersSent) res.sendStatus(500);
+        });
+
+        req.on('close', () => {
+            proxyReq.destroy();
+        });
+
+        proxyReq.end();
+    } catch (e) {
+        if (!res.headersSent) res.status(500).send('Proxy stream failed');
+    }
 });
+
+function getDirectUrlWithArgs(args) {
+    return new Promise((resolve, reject) => {
+        const ytDlp = spawn(YTDLP_PATH, args);
+        let stdout = '';
+        let stderr = '';
+        ytDlp.stdout.on('data', d => stdout += d.toString());
+        ytDlp.stderr.on('data', d => stderr += d.toString());
+        ytDlp.on('close', (code) => {
+            if (code === 0 && stdout.trim()) {
+                resolve(stdout.trim().split('\n')[0]);
+            } else {
+                reject(new Error(stderr || 'yt-dlp stream resolution returned empty'));
+            }
+        });
+    });
+}
 
 // ৫. ভিডিওর আসল নাম এবং নোটিফিকেশন সমৃদ্ধ প্রসেস ডাউনলোড এপিআই
 app.get('/api/download-start', async (req, res) => {
@@ -247,11 +372,17 @@ app.get('/api/download-start', async (req, res) => {
 
     const args = [
         '-f', format, 
-        '--extractor-args', 'youtube:player_client=default,-android_sdkless',
+        '--extractor-args', 'youtube:player_client=android,web',
         '-o', outputTemplate, 
         videoUrl
     ];
-    const ytDlp = spawn('yt-dlp', args);
+
+    const cookiesPath = path.join(__dirname, 'cookies.txt');
+    if (fs.existsSync(cookiesPath)) {
+        args.push('--cookies', cookiesPath);
+    }
+
+    const ytDlp = spawn(YTDLP_PATH, args);
 
     downloadsInProgress[downloadId].process = ytDlp;
 
@@ -271,20 +402,26 @@ app.get('/api/download-start', async (req, res) => {
             downloadsInProgress[downloadId].status = 'completed';
             downloadsInProgress[downloadId].fileName = downloadedFileName;
 
-            // গ্যালারিতে ভিডিও রিফ্রেশ করার মিডিয়া স্ক্যানার রান
-            const fullPath = path.join(downloadsDir, downloadedFileName);
-            exec(`termux-media-scan "${fullPath}"`, (scanErr) => {
-                if (scanErr) console.log("termux-media-scan failed or not installed:", scanErr);
-            });
+            // শুধুমাত্র অ্যান্ড্রয়েড/টার্মাক্স ডিভাইসে থাকলে গ্যালারি স্ক্যানার ও নোটিফিকেশন রান করবে
+            const isAndroid = downloadsDir.includes('shared') || downloadsDir.includes('sdcard');
+            
+            if (isAndroid) {
+                const fullPath = path.join(downloadsDir, downloadedFileName);
+                exec(`termux-media-scan "${fullPath}"`, (scanErr) => {
+                    if (scanErr) console.log("termux-media-scan failed or not installed:", scanErr);
+                });
 
-            // নোটিফিকেশন প্রদর্শন
-            let notificationCmd = `termux-notification --title "Minitube ডাউনলোড সম্পন্ন" --content "${safeTitle}" --id "${downloadId}"`;
-            if (fs.existsSync(cachedThumbPath)) {
-                notificationCmd += ` --image-path "${cachedThumbPath}"`;
+                // নোটিফিকেশন প্রদর্শন
+                let notificationCmd = `termux-notification --title "Minitube ডাউনলোড সম্পন্ন" --content "${safeTitle}" --id "${downloadId}"`;
+                if (fs.existsSync(cachedThumbPath)) {
+                    notificationCmd += ` --image-path "${cachedThumbPath}"`;
+                }
+                exec(notificationCmd, (notifErr) => {
+                    if (notifErr) console.log("termux-api notification error:", notifErr);
+                });
+            } else {
+                console.log(`ডাউনলোড সম্পন্ন হয়েছে (ক্লাউড সার্ভার): ${downloadedFileName}`);
             }
-            exec(notificationCmd, (notifErr) => {
-                if (notifErr) console.log("termux-api notification error:", notifErr);
-            });
 
         } else {
             downloadsInProgress[downloadId].status = 'failed';
@@ -328,14 +465,21 @@ app.get('/api/get-file', (req, res) => {
 // yt-dlp সার্চ মেথড
 function searchYouTube(query) {
     return new Promise((resolve, reject) => {
-        const ytDlp = spawn('yt-dlp', [
+        const args = [
             `ytsearch20:${query}`,
             '--flat-playlist',
             '--dump-single-json',
             '--no-warnings',
             '--ignore-errors',
-            '--extractor-args', 'youtube:player_client=default,-android_sdkless'
-        ]);
+            '--extractor-args', 'youtube:player_client=android,web'
+        ];
+
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        if (fs.existsSync(cookiesPath)) {
+            args.push('--cookies', cookiesPath);
+        }
+
+        const ytDlp = spawn(YTDLP_PATH, args);
 
         let stdout = '';
         let stderr = '';
@@ -394,16 +538,19 @@ function getLocalIpAddress() {
     return null;
 }
 
-app.listen(PORT, () => {
-    const localIp = getLocalIpAddress();
-    console.log("====================================================");
-    console.log("🚀 সার্ভার সফলভাবে চালু হয়েছে!");
-    console.log("💻 লোকাল: http://localhost:" + PORT);
-    console.log("📂 ডাউনলোড পাথ: " + downloadsDir);
-    if (localIp) {
-        console.log("📱 মোবাইল: http://" + localIp + ":" + PORT);
-    } else {
-        console.log("📱 মোবাইল: (ওয়াইফাই ডিসকানেক্টেড)");
-    }
-    console.log("====================================================");
+// প্রথমে yt-dlp এনভায়রনমেন্ট চেক বা ডাউনলোড করা হবে, তারপর সার্ভার লিসেন করবে
+checkYtdlp().then(() => {
+    app.listen(PORT, () => {
+        const localIp = getLocalIpAddress();
+        console.log("====================================================");
+        console.log("🚀 সার্ভার সফলভাবে চালু হয়েছে!");
+        console.log("💻 লোকাল: http://localhost:" + PORT);
+        console.log("📂 ডাউনলোড পাথ: " + downloadsDir);
+        if (localIp) {
+            console.log("📱 মোবাইল: http://" + localIp + ":" + PORT);
+        } else {
+            console.log("📱 মোবাইল: (ওয়াইফাই ডিসকানেক্টেড/ক্লাউড রান)");
+        }
+        console.log("====================================================");
+    });
 });
