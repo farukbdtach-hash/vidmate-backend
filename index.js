@@ -8,19 +8,63 @@ const os = require('os');
 const app = express();
 const PORT = 3000;
 
-const downloadsDir = path.join(__dirname, 'downloads');
-if (!fs.existsSync(downloadsDir)) {
-    fs.mkdirSync(downloadsDir, { recursive: true });
+// অ্যান্ড্রয়েড পাবলিক ডাউনলোড ফোল্ডার অ্যাক্সেস করার পাথ নির্ধারণ
+const homeDir = os.homedir();
+const termuxSharedDir = path.join(homeDir, 'storage', 'shared', 'Download');
+const sdcardDir = '/sdcard/Download';
+
+let downloadsDir = path.join(__dirname, 'downloads'); // Fallback local directory
+
+if (fs.existsSync(sdcardDir)) {
+    downloadsDir = path.join(sdcardDir, 'Minitube');
+} else if (fs.existsSync(termuxSharedDir)) {
+    downloadsDir = path.join(termuxSharedDir, 'Minitube');
 }
 
+// ফোল্ডারটি না থাকলে তৈরি করে নেওয়া হবে
+if (!fs.existsSync(downloadsDir)) {
+    try {
+        fs.mkdirSync(downloadsDir, { recursive: true });
+    } catch (e) {
+        downloadsDir = path.join(__dirname, 'downloads');
+        if (!fs.existsSync(downloadsDir)) {
+            fs.mkdirSync(downloadsDir);
+        }
+    }
+}
+
+const downloadsInProgress = {};
 const streamCache = {}; 
 
+const keepAliveAgent = new https.Agent({
+    keepAlive: true,
+    maxSockets: 300,
+    keepAliveMsecs: 15000
+});
+
+// ফাইল সিস্টেম ব্রেকিং ক্যারেক্টার ক্লিন করার ফাংশন
 function sanitizeFilename(title) {
     if (!title) return 'video_' + Date.now();
-    let sanitized = title.replace(/[^\w\s\u0980-\u09FF-]/gi, ''); 
+    let sanitized = title.replace(/[^\w\s\u0980-\u09FF-]/gi, ''); // বাংলা, ইংরেজি বর্ণ ও সংখ্যা অনুমতি দেওয়া হলো
     sanitized = sanitized.trim().replace(/\s+/g, ' ');
     if (!sanitized) return 'video_' + Date.now();
     return sanitized;
+}
+
+// নোটিফিকেশনের জন্য ইমেজ বা থাম্বনেইল ডাউনলোড করার হেল্পার
+function downloadThumbnail(url, destPath) {
+    return new Promise((resolve, reject) => {
+        const file = fs.createWriteStream(destPath);
+        https.get(url, (response) => {
+            response.pipe(file);
+            file.on('finish', () => {
+                file.close(resolve);
+            });
+        }).on('error', (err) => {
+            fs.unlink(destPath, () => {}); 
+            reject(err);
+        });
+    });
 }
 
 app.use((req, res, next) => {
@@ -34,6 +78,8 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json());
+app.use('/videos', express.static(downloadsDir));
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -80,7 +126,7 @@ app.get('/api/info', (req, res) => {
 
     const ytDlp = spawn('yt-dlp', [
         '-j', 
-        '--extractor-args', 'youtube:player_client=android',
+        '--extractor-args', 'youtube:player_client=default,-android_sdkless',
         videoUrl
     ]);
     let stdout = '';
@@ -112,187 +158,183 @@ function formatDuration(sec) {
     return `${m}:${s}`;
 }
 
-// ৪. প্লেব্যাক ফিক্স: Range Request Proxying (IP-Lock মুক্ত এবং দ্রুত বাফারিং ছাড়া প্লেব্যাক ও কাটা-কাটি)
-app.get('/api/stream', async (req, res) => {
+// ৪. ক্যাশ মেমোরি নিয়ন্ত্রিত হাই-স্পীড প্লেব্যাক স্ট্রিম
+app.get('/api/stream', (req, res) => {
     const videoUrl = req.query.url;
     const quality = req.query.quality || '360p';
     if (!videoUrl) return res.status(400).send('URL is required');
 
     const cacheKey = `${videoUrl}_${quality}`;
-    let directUrl = '';
-
     if (streamCache[cacheKey] && streamCache[cacheKey].expiry > Date.now()) {
-        directUrl = streamCache[cacheKey].directUrl;
-    } else {
-        try {
-            // প্রগ্রেসিভ সিঙ্গেল ফাইল ফরম্যাট ব্যবহারের মাধ্যমে দ্রুত স্ট্রিমিং নিশ্চিত করা হয়েছে
-            let format = '18/best[height<=360][ext=mp4]/best';
-            if (quality === '1080p') format = 'best[height<=1080][ext=mp4]/best';
-            if (quality === '720p') format = '22/best[height<=720][ext=mp4]/best';
-            if (quality === '480p') format = 'best[height<=480][ext=mp4]/best';
-            if (quality === '360p') format = '18/best[height<=360][ext=mp4]/best';
-
-            directUrl = await getDirectUrl(videoUrl, format);
-            streamCache[cacheKey] = {
-                directUrl: directUrl,
-                expiry: Date.now() + (1000 * 60 * 60) 
-            };
-        } catch (err) {
-            return res.status(500).send('Streaming resolution failed: ' + err.message);
-        }
+        return res.redirect(302, streamCache[cacheKey].directUrl);
     }
 
-    // ব্রাউজারের Range Request ইউটিউব সার্ভারে প্রক্সি করা হলো, যা কাটা-কাটি (Seeking) দ্রুত করবে
-    try {
-        const parsedUrl = new URL(directUrl);
-        const headers = {};
-        
-        if (req.headers.range) {
-            headers['Range'] = req.headers.range;
-        }
-        headers['User-Agent'] = req.headers['user-agent'] || 'Mozilla/5.0';
-
-        const options = {
-            hostname: parsedUrl.hostname,
-            port: parsedUrl.port || 443,
-            path: parsedUrl.pathname + parsedUrl.search,
-            method: 'GET',
-            headers: headers
-        };
-
-        const proxyReq = https.request(options, (proxyRes) => {
-            res.writeHead(proxyRes.statusCode, proxyRes.headers);
-            proxyRes.pipe(res);
-        });
-
-        proxyReq.on('error', (e) => {
-            console.error('Proxy request error:', e);
-            if (!res.headersSent) res.sendStatus(500);
-        });
-
-        req.on('close', () => {
-            proxyReq.destroy();
-        });
-
-        proxyReq.end();
-
-    } catch (e) {
-        res.status(500).send('Streaming error occurred');
-    }
-});
-
-// ৫. ডাউনলোড ফিক্স: সরাসরি মোবাইলের গ্যালারিতে সেভ হওয়ার জন্য হেডার এবং ১০৮০পি মার্জিং ফিক্স
-app.get('/api/download-fast', async (req, res) => {
-    const videoUrl = req.query.url;
-    const quality = req.query.quality || '360p';
-    const title = req.query.title || 'video_' + Date.now();
-
-    if (!videoUrl) return res.status(400).send('URL is required');
-
-    const safeTitle = sanitizeFilename(title);
-    const ext = (quality === 'audio' || quality === 'audio_high') ? 'm4a' : 'mp4';
-
-    // ফাইল ডাউনলোড রেসপন্স হেডার (যাতে ব্রাউজার সরাসরি গ্যালারিতে সেভ করার অপশন পায়)
-    res.attachment(`${safeTitle}.${ext}`);
-    res.setHeader('Content-Type', (quality === 'audio' || quality === 'audio_high') ? 'audio/mp4' : 'video/mp4');
-
-    // ১০৮০পি ভিডিও ডাউনলোড করার জন্য ভিডিও ও অডিও মার্জ করা প্রয়োজন যা সরাসরি পাইপ করা সম্ভব নয়।
-    // তাই এটি প্রথমে সার্ভারে ডাউনলোড ও মার্জ হয়ে সরাসরি ইউজারের ফোনে চলে যাবে এবং সার্ভার থেকে ডিলিট হয়ে যাবে।
-    if (quality === '1080p') {
-        const tempFilePath = path.join(downloadsDir, `${safeTitle}_temp_${Date.now()}.${ext}`);
-        
-        const ytDlpDownload = spawn('yt-dlp', [
-            '-f', 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            '-o', tempFilePath,
-            '--no-playlist',
-            '--no-warnings',
-            '--ignore-errors',
-            '--extractor-args', 'youtube:player_client=android',
-            videoUrl
-        ]);
-
-        ytDlpDownload.on('close', (code) => {
-            if (code === 0 && fs.existsSync(tempFilePath)) {
-                res.download(tempFilePath, `${safeTitle}.${ext}`, (err) => {
-                    // ডাউনলোড শেষ হলে সার্ভারের জায়গা বাঁচাতে টেম্পোরারি ফাইল ডিলিট করা হলো
-                    fs.unlink(tempFilePath, () => {});
-                });
-            } else {
-                if (!res.headersSent) res.status(500).send('Download and merge failed.');
-            }
-        });
-
-        req.on('close', () => {
-            ytDlpDownload.kill();
-            if (fs.existsSync(tempFilePath)) fs.unlink(tempFilePath, () => {});
-        });
-        return;
-    }
-
-    // ৩৬০পি বা ৭২০পি-র জন্য সরাসরি ইনস্ট্যান্ট ফাস্ট স্ট্রিম পাইপিং (মার্জ করার প্রয়োজন নেই)
-    let format = '18/best[height<=360][ext=mp4]/best';
-    if (quality === '720p') format = '22/best[height<=720][ext=mp4]/best';
-    if (quality === '480p') format = '18/best[height<=480][ext=mp4]/best';
+    let format = '18/best[ext=mp4]/best';
+    if (quality === '1080p') format = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best';
+    if (quality === '720p') format = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best';
+    if (quality === '480p') format = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best';
     if (quality === '360p') format = '18/best[height<=360][ext=mp4]/best';
-    if (quality === 'audio_high' || quality === 'audio') format = '140/ba[ext=m4a]/bestaudio';
 
     const ytDlp = spawn('yt-dlp', [
-        '-f', format,
-        '-o', '-', 
-        '--no-playlist',
-        '--no-warnings',
-        '--ignore-errors',
-        '--extractor-args', 'youtube:player_client=android',
+        '-f', format, 
+        '--no-playlist', 
+        '--no-warnings', 
+        '--ignore-errors', 
+        '--extractor-args', 'youtube:player_client=default,-android_sdkless',
+        '-g', 
         videoUrl
     ]);
 
-    ytDlp.stdout.pipe(res);
+    let stdout = '';
+    let stderr = '';
+
+    ytDlp.stdout.on('data', (data) => stdout += data.toString());
+    ytDlp.stderr.on('data', (data) => stderr += data.toString());
 
     ytDlp.on('close', (code) => {
-        if (code !== 0) {
-            console.error(`yt-dlp download exited with code ${code}`);
-        }
-    });
+        if (code === 0 && stdout.trim()) {
+            const streamDirectUrl = stdout.trim().split('\n')[0];
+            
+            streamCache[cacheKey] = {
+                directUrl: streamDirectUrl,
+                expiry: Date.now() + (1000 * 60 * 60) 
+            };
 
-    req.on('close', () => {
-        ytDlp.kill();
+            res.redirect(302, streamDirectUrl);
+        } else {
+            res.status(500).send('Streaming failed: ' + stderr);
+        }
     });
 });
 
-function getDirectUrl(videoUrl, format) {
-    return new Promise((resolve, reject) => {
-        const ytDlp = spawn('yt-dlp', [
-            '-f', format,
-            '--no-playlist',
-            '--no-warnings',
-            '--ignore-errors',
-            '--extractor-args', 'youtube:player_client=android',
-            '-g',
-            videoUrl
-        ]);
-        let stdout = '';
-        let stderr = '';
-        ytDlp.stdout.on('data', d => stdout += d.toString());
-        ytDlp.stderr.on('data', d => stderr += d.toString());
-        ytDlp.on('close', (code) => {
-            if (code === 0 && stdout.trim()) {
-                resolve(stdout.trim().split('\n')[0]);
-            } else {
-                reject(new Error(stderr || 'yt-dlp stream resolution returned empty'));
-            }
-        });
-    });
-}
+// ৫. ভিডিওর আসল নাম এবং নোটিফিকেশন সমৃদ্ধ প্রসেস ডাউনলোড এপিআই
+app.get('/api/download-start', async (req, res) => {
+    const videoUrl = req.query.url;
+    const quality = req.query.quality || '360p';
+    const clientTitle = req.query.title || 'video_' + Date.now();
+    const thumbnailExtUrl = req.query.thumbnail;
 
+    if (!videoUrl) return res.status(400).json({ error: 'URL is required' });
+
+    const safeTitle = sanitizeFilename(clientTitle);
+    const downloadId = 'dl_' + Date.now();
+
+    downloadsInProgress[downloadId] = {
+        status: 'downloading',
+        percent: 0,
+        totalSize: 'Calculating...',
+        speed: '0 KB/s',
+        fileName: ''
+    };
+
+    let format = 'best[ext=mp4]/best';
+    if (quality === '1080p') format = 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
+    if (quality === '720p') format = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
+    if (quality === '480p') format = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
+    if (quality === '360p') format = 'best[height<=360][ext=mp4]/best';
+    if (quality === 'audio_high' || quality === 'audio') format = 'ba[ext=m4a]/bestaudio';
+
+    const ext = (quality === 'audio' || quality === 'audio_high') ? 'm4a' : 'mp4';
+    
+    // ভিডিওর আসল টাইটেল যুক্ত করে ফোল্ডার পাথ তৈরি
+    const outputTemplate = path.join(downloadsDir, `${safeTitle}.${ext}`);
+
+    // নোটিফিকেশনের থাম্বনেইল ডাউনলোড করার জন্য ব্যাকগ্রাউন্ড পাথ প্রিপারেশন
+    const cachedThumbPath = path.join(downloadsDir, `${safeTitle}_thumb.jpg`);
+    if (thumbnailExtUrl && thumbnailExtUrl.startsWith('http')) {
+        downloadThumbnail(thumbnailExtUrl, cachedThumbPath).catch(() => {});
+    }
+
+    const args = [
+        '-f', format, 
+        '--extractor-args', 'youtube:player_client=default,-android_sdkless',
+        '-o', outputTemplate, 
+        videoUrl
+    ];
+    const ytDlp = spawn('yt-dlp', args);
+
+    downloadsInProgress[downloadId].process = ytDlp;
+
+    ytDlp.stdout.on('data', (data) => {
+        const text = data.toString();
+        const progressMatch = text.match(/\[download\]\s+([\d.]+)%\s+of\s+([\d.\w]+)\s+at\s+([\d.\w/]+)/);
+        if (progressMatch) {
+            downloadsInProgress[downloadId].percent = parseFloat(progressMatch[1]);
+            downloadsInProgress[downloadId].totalSize = progressMatch[2];
+            downloadsInProgress[downloadId].speed = progressMatch[3];
+        }
+    });
+
+    ytDlp.on('close', (code) => {
+        if (code === 0) {
+            const downloadedFileName = `${safeTitle}.${ext}`;
+            downloadsInProgress[downloadId].status = 'completed';
+            downloadsInProgress[downloadId].fileName = downloadedFileName;
+
+            // গ্যালারিতে ভিডিও রিফ্রেশ করার মিডিয়া স্ক্যানার রান
+            const fullPath = path.join(downloadsDir, downloadedFileName);
+            exec(`termux-media-scan "${fullPath}"`, (scanErr) => {
+                if (scanErr) console.log("termux-media-scan failed or not installed:", scanErr);
+            });
+
+            // নোটিফিকেশন প্রদর্শন
+            let notificationCmd = `termux-notification --title "Minitube ডাউনলোড সম্পন্ন" --content "${safeTitle}" --id "${downloadId}"`;
+            if (fs.existsSync(cachedThumbPath)) {
+                notificationCmd += ` --image-path "${cachedThumbPath}"`;
+            }
+            exec(notificationCmd, (notifErr) => {
+                if (notifErr) console.log("termux-api notification error:", notifErr);
+            });
+
+        } else {
+            downloadsInProgress[downloadId].status = 'failed';
+        }
+    });
+
+    res.json({ downloadId });
+});
+
+// ৬. ডাউনলোডের রিয়েল-টাইম স্ট্যাটাস
+app.get('/api/download-status', (req, res) => {
+    const id = req.query.id;
+    if (!id || !downloadsInProgress[id]) {
+        return res.status(404).json({ error: 'Download task not found' });
+    }
+    const task = downloadsInProgress[id];
+    res.json({
+        status: task.status,
+        percent: task.percent,
+        totalSize: task.totalSize,
+        speed: task.speed,
+        fileName: task.fileName
+    });
+});
+
+// ৭. লোকাল ফাইল মিডিয়াতে পাঠানো
+app.get('/api/get-file', (req, res) => {
+    const fileName = req.query.file;
+    if (!fileName) return res.status(400).send('File name is required');
+    
+    const safeName = path.basename(fileName);
+    const filePath = path.join(downloadsDir, safeName);
+
+    if (fs.existsSync(filePath)) {
+        res.download(filePath, safeName);
+    } else {
+        res.status(404).send('File not found');
+    }
+});
+
+// yt-dlp সার্চ মেথড
 function searchYouTube(query) {
     return new Promise((resolve, reject) => {
         const ytDlp = spawn('yt-dlp', [
-            `ytsearch45:${query}`,
+            `ytsearch20:${query}`,
             '--flat-playlist',
             '--dump-single-json',
             '--no-warnings',
             '--ignore-errors',
-            '--extractor-args', 'youtube:player_client=android'
+            '--extractor-args', 'youtube:player_client=default,-android_sdkless'
         ]);
 
         let stdout = '';
@@ -357,8 +399,11 @@ app.listen(PORT, () => {
     console.log("====================================================");
     console.log("🚀 সার্ভার সফলভাবে চালু হয়েছে!");
     console.log("💻 লোকাল: http://localhost:" + PORT);
+    console.log("📂 ডাউনলোড পাথ: " + downloadsDir);
     if (localIp) {
         console.log("📱 মোবাইল: http://" + localIp + ":" + PORT);
+    } else {
+        console.log("📱 মোবাইল: (ওয়াইফাই ডিসকানেক্টেড)");
     }
     console.log("====================================================");
 });
