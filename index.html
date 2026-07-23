@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,7 +8,7 @@
     <!-- FontAwesome Icons CDN -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
-    <link rel="preconnect" href="http://127.0.0.1:3000">
+    <link rel="preconnect" href="http://192.168.0.198:3000">
 
     <style>
         :root {
@@ -722,7 +723,7 @@
             display: none;
         }
 
-        /* প্লেয়ার সাজেস্টেড সেকশন */
+        /* প্লেয়ার সাজেস্টেড সেকশন */
         .player-suggested-section {
             background-color: var(--bg-primary);
             padding: 0;
@@ -818,7 +819,7 @@
             100% { transform: scale(1.4); opacity: 0; }
         }
 
-        /* মীন প্লেয়ার ক্লোজ ক্রস বাটন */
+        /* মিনি প্লেয়ার ক্লোজ ক্রস বাটন */
         .mini-close-btn {
             position: absolute;
             top: 6px;
@@ -930,7 +931,7 @@
             transform: translateX(20px);
         }
 
-        /* প্রো ডাউনলোড শিট */
+        /* প্রো ডাউনলোডার শিট */
         .backdrop {
             position: fixed;
             inset: 0;
@@ -1083,7 +1084,7 @@
             </div>
         </header>
 
-        <!--  সার্চ মোড হেডার (ইউটিউবের মতো কিওয়ার্ড সেভ রাখবে) -->
+        <!-- সার্চ মোড হেডার -->
         <header class="app-header" id="appHeaderSearchMode" style="display: none; align-items: center; justify-content: space-between; padding: 14px 16px; width: 100%;">
             <div style="display: flex; align-items: center; gap: 12px; width: 100%;">
                 <button class="search-back-btn" onclick="exitSearchMode()" style="background: none; border: none; color: var(--text-primary); font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;"><i class="fa-solid fa-arrow-left"></i></button>
@@ -1103,7 +1104,7 @@
             <div class="tab-item" onclick="switchTab(this, 'bangla funny video short')">Funny</div>
         </div>
 
-        <!--  সার্চ সাজেশন উইন্ডো -->
+        <!-- সার্চ সাজেশন উইন্ডো -->
         <div id="searchOverlay" class="search-overlay">
             <div class="search-overlay-header">
                 <button class="search-back-btn" onclick="closeSearchOverlay()"><i class="fa-solid fa-arrow-left"></i></button>
@@ -1146,12 +1147,10 @@
                     <p class="loader-text">বাফারিং হচ্ছে...</p>
                 </div>
 
-                <!-- থাম্বনেইল ওভারলে (VidMate স্টাইল স্পিন লোডারসহ) -->
+                <!-- থাম্বনেইল ওভারলে -->
                 <div id="thumbnailContainer" class="thumbnail-container">
                     <img id="videoThumb" src="" class="thumbnail-img">
-                    <!-- মেইন প্লে আইকন -->
                     <div id="thumbnailPlayBtn" class="play-overlay-btn"><i class="fa-solid fa-play"></i></div>
-                    <!-- উইডমেট স্পিনিং লোডার লেয়ার -->
                     <div id="thumbnailLoader" class="hidden" style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.65); z-index: 22; gap: 12px; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);">
                         <div class="loader-spinner" style="width: 48px; height: 48px; border-top-color: var(--accent-color);"></div>
                         <p style="color: white; font-size: 11px; font-weight: bold; letter-spacing: 0.5px;">লিঙ্ক খোঁজা হচ্ছে...</p>
@@ -1217,7 +1216,7 @@
                     <div id="circularProgressBtn" class="circular-progress-download-container" onclick="openDownloadSheet()" title="ডাউনলোড চয়েজ">
                         <svg class="progress-ring" width="56" height="56">
                             <circle class="progress-ring__background" stroke="#1e293b" stroke-width="4" fill="transparent" r="24" cx="28" cy="28"/>
-                            <circle id="downloadProgressCircle" class="progress-ring__circle" stroke="#ef4444" stroke-width="4" fill="transparent" r="24" cx="24" cy="24" stroke-dasharray="150.8" stroke-dashoffset="150.8"/>
+                            <circle id="downloadProgressCircle" class="progress-ring__circle" stroke="#ef4444" stroke-width="4" fill="transparent" r="24" cx="28" cy="28" stroke-dasharray="150.8" stroke-dashoffset="150.8"/>
                         </svg>
                         <div id="downloadBtnContent" class="download-icon-inner">
                             <i class="fa-solid fa-arrow-down"></i>
@@ -1237,6 +1236,12 @@
         <!-- ভিউ ১: ভিডিও ফিড ভিউ (Home) -->
         <div id="homeView" class="app-view-tab active-view">
             <div class="feed-section">
+                <!-- ইউটিউব ডেডিকেটেড সার্চ রেজাল্ট হেডার -->
+                <div id="searchResultHeader" style="display: none; align-items: center; gap: 12px; margin: 16px 16px 12px 16px;">
+                    <button onclick="exitSearchMode()" style="background: none; border: none; color: var(--text-primary); font-size: 18px; cursor: pointer;" title="হোমে ফিরুন"><i class="fa-solid fa-arrow-left"></i></button>
+                    <h3 id="searchResultTitle" style="font-size: 14px; color: var(--text-primary); margin: 0; font-weight: bold;"></h3>
+                </div>
+                
                 <h3 id="defaultGridHeader" class="grid-title" style="font-size: 14px; margin: 16px 16px 12px 16px; color: var(--text-primary);"><i class="fa-solid fa-film text-red-500"></i> সাজেস্টেড ও ট্রেন্ডিং</h3>
                 <div id="gridLoading" class="grid-loading"><i class="fa-solid fa-spinner spinner text-red-500"></i></div>
                 <div id="videoGrid" class="video-grid"></div>
@@ -1304,19 +1309,7 @@
             </div>
         </div>
 
-        <!-- ভিউ ৬: ডেডিকেটেড সার্চ রেজাল্ট ভিউ (ইউটিউব/VidMate স্টাইল) -->
-        <div id="searchResultView" class="app-view-tab">
-            <div class="feed-section">
-                <div style="display: flex; align-items: center; gap: 12px; margin: 16px 16px 12px 16px;">
-                    <button onclick="exitSearchMode()" style="background: none; border: none; color: var(--text-primary); font-size: 18px; cursor: pointer;" title="ফিরে যান"><i class="fa-solid fa-arrow-left"></i></button>
-                    <h3 id="searchResultTitleDedicated" style="font-size: 14px; color: var(--text-primary); margin: 0; font-weight: bold;">সার্চ ফলাফল</h3>
-                </div>
-                <div id="searchResultLoading" class="grid-loading" style="display: none;"><i class="fa-solid fa-spinner spinner text-red-500"></i></div>
-                <div id="searchResultGrid" class="video-grid"></div>
-            </div>
-        </div>
-
-        <!-- বটম নেভিগেশন বার -->
+        <!--底部导航栏 -->
         <nav id="bottomNav" class="bottom-nav">
             <div class="nav-item active" onclick="switchMainTab(this, 'home')">
                 <i class="fa-solid fa-house"></i>
@@ -1345,13 +1338,13 @@
 
     </div>
 
-    <!-- গ্লোবাল ৩-ডট পপআপ ড্রপডাউন মেনু -->
+    <!-- ৩-ডট পপআপ ড্রপডাউন মেনু -->
     <div id="cardDropdownMenu" class="card-dropdown-menu">
         <div class="dropdown-item" onclick="shareFromMenu()"><i class="fa-solid fa-share-nodes"></i> শেয়ার করুন</div>
         <div class="dropdown-item" onclick="downloadFromMenu()"><i class="fa-solid fa-circle-down"></i> ডাউনলোড করুন</div>
     </div>
 
-    <!-- প্রো স্প্লিট কোয়ালিটি ডাউনলোডার বটম শিট -->
+    <!-- ডাউনলোডার বটম শিট -->
     <div id="backdrop" class="backdrop" onclick="closeDownloadSheet()"></div>
     <div id="downloadSheet" class="download-sheet">
         <div class="sheet-header">
@@ -1424,7 +1417,7 @@
         let searchTimeout;
         let controlsTimeout;
         let isDraggingProgress = false;
-        let dragPercent = 0;
+        let dragPercent = 0; // ড্র্যাগ করা ট্র্যাক করার জন্য গ্লোবাল ভেরিয়েবল
         let isSearchOpen = false;
 
         let menuActiveVideo = { url: '', title: '', thumbnail: '' };
@@ -1456,7 +1449,7 @@
             }
         }
 
-        //  রিয়েল-টাইম স্ক্রলিং (অটো-হাইড হেডার ও ফুটার)
+        // রিয়েল-টাইম স্ক্রলিং (অটো-হাইড হেডার ও ফুটার)
         let lastScrollY = window.scrollY;
         window.addEventListener('scroll', () => {
             if (isSearchOpen || (playerState === 'opened')) return;
@@ -1567,12 +1560,16 @@
                 sHeader.style.display = 'flex';
                 document.getElementById('headerSearchInput').value = query;
 
-                // নতুন ডেডিকেটেড সার্চ রেজাল্ট ভিউতে নিয়ে যাবে
-                document.querySelectorAll('.app-view-tab').forEach(view => view.classList.remove('active-view'));
-                document.getElementById('searchResultView').classList.add('active-view');
-                document.getElementById('searchResultTitleDedicated').innerText = `সার্চ রেজাল্ট: "${query}"`;
+                // সাজেস্টেড ক্লিয়ার করে সার্চ রেজাল্ট পেজ লোড
+                document.getElementById('defaultGridHeader').style.display = 'none';
+                const searchResultHeader = document.getElementById('searchResultHeader');
+                searchResultHeader.style.display = 'flex';
+                document.getElementById('searchResultTitle').innerText = `সার্চ রেজাল্ট: "${query}"`;
                 
-                loadSearchResultVideos(query);
+                // হোম ভিউতে নিয়ে যাবে
+                switchMainTab(document.querySelector('.nav-item'), 'home');
+
+                loadTrendingVideos(query);
             }
         }
 
@@ -1580,10 +1577,8 @@
             document.getElementById('appHeaderSearchMode').style.display = 'none';
             document.getElementById('appHeaderDefault').style.display = 'flex';
             
-            // সার্চ রেজাল্ট ভিউ থেকে হোমে নিয়ে যাবে
-            document.querySelectorAll('.app-view-tab').forEach(view => view.classList.remove('active-view'));
-            document.getElementById('homeView').classList.add('active-view');
-            
+            document.getElementById('searchResultHeader').style.display = 'none';
+            document.getElementById('defaultGridHeader').style.display = 'block';
             loadTrendingVideos(); 
         }
 
@@ -1718,65 +1713,6 @@
             } finally {
                 gridLoading.style.display = 'none';
                 isFeedLoading = false;
-            }
-        }
-
-        // আনলিমিটেড গানের ভিউতে লোড করার স্পেশাল ফাংশন
-        async function loadSearchResultVideos(query) {
-            const grid = document.getElementById('searchResultGrid');
-            const loading = document.getElementById('searchResultLoading');
-            grid.innerHTML = '';
-            loading.style.display = 'block';
-
-            try {
-                const response = await fetchWithTimeout(`${SERVER_URL}/api/search?q=${encodeURIComponent(query)}`);
-                const data = await response.json();
-
-                if (data.results && data.results.length > 0) {
-                    currentPlaylist = data.results;
-                    data.results.forEach((video) => {
-                        const randomViews = (Math.random() * 5 + 1).toFixed(1); 
-                        const card = document.createElement('div');
-                        card.className = 'video-card';
-                        
-                        card.innerHTML = `
-                            <div class="card-thumb-container">
-                                <img src="${video.thumbnail}" loading="lazy" class="card-thumb-img" onerror="this.src='https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=500';">
-                                <span class="card-duration">${video.duration}</span>
-                                <button class="card-menu-btn">
-                                    <i class="fa-solid fa-ellipsis-vertical"></i>
-                                </button>
-                            </div>
-                            <div class="card-info">
-                                <h4 class="card-title"></h4>
-                                <p class="card-meta">
-                                    <span class="watermark-text">Developer: Mr.Faruk</span> • 
-                                    <i class="fa-regular fa-eye"></i> ${randomViews}M views
-                                </p>
-                            </div>
-                        `;
-                        
-                        card.querySelector('.card-title').textContent = video.title;
-                        
-                        card.addEventListener('click', (e) => {
-                            if (e.target.closest('.card-menu-btn')) return;
-                            selectVideo(video.url, video.title, video.thumbnail, true);
-                        });
-                        
-                        card.querySelector('.card-menu-btn').addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            toggleCardMenu(e, video.url, video.title, video.thumbnail);
-                        });
-                        
-                        grid.appendChild(card);
-                    });
-                } else {
-                    grid.innerHTML = '<p style="text-align: center; font-size: 11px; color: var(--text-secondary); padding: 20px;">কোনো গান পাওয়া যায়নি ভাই!</p>';
-                }
-            } catch (err) {
-                grid.innerHTML = '<p style="text-align: center; font-size: 11px; color: var(--text-secondary); padding: 20px;">গান লোড করা যায়নি! প্রক্সি আইপি বা ইন্টারনেট চেক করুন।</p>';
-            } finally {
-                loading.style.display = 'none';
             }
         }
 
@@ -2132,20 +2068,9 @@
                 const sData = await sRes.json();
                 if (sData.results && sData.results.length > 0) {
                     renderSuggestedGridInPlayer(sData.results);
-                } else {
-                    fallbackSuggestedVideos();
                 }
             } catch (e) {
-                fallbackSuggestedVideos();
-            }
-        }
-
-        function fallbackSuggestedVideos() {
-            const cached = localStorage.getItem('cached_videos');
-            if (cached) {
-                try {
-                    renderSuggestedGridInPlayer(shuffleArray(JSON.parse(cached)).slice(0, 15));
-                } catch(e) {}
+                console.log("Error loading suggested videos", e);
             }
         }
 
@@ -2165,7 +2090,7 @@
             setPlayerState('opened');
         }
 
-        //  ড্র্যাগেবল মিনি-প্লেয়ার জেসচার হ্যান্ডলার
+        // ড্র্যাগেবল মিনি-প্লেয়ার জেসচার হ্যান্ডলার
         let miniDragOccurred = false; 
         function makeMiniPlayerDraggable() {
             let isDraggingMini = false;
@@ -2173,6 +2098,7 @@
 
             playerSection.addEventListener('touchstart', (e) => {
                 if (playerState !== 'minimized') return;
+                // ক্লোজ বাটনে টাচ করলে ড্র্যাগ ইভেন্ট বন্ধ থাকবে
                 if (e.target.closest('#miniCloseBtn')) {
                     return;
                 }
@@ -2202,6 +2128,7 @@
 
             playerSection.addEventListener('touchend', (e) => {
                 isDraggingMini = false;
+                // ক্লোজ বাটনে ক্লিক করলে প্লেয়ার প্রসারিত হবে না
                 if (e.target.closest('#miniCloseBtn')) {
                     return;
                 }
@@ -2229,7 +2156,6 @@
             }
         }
 
-        // CC এবং Cast
         function triggerCast() {
             alert("কাস্টিং ডিভাইস খোঁজা হচ্ছে... অনুগ্রহ করে ওয়াইফাই কানেকশনটি চেক করুন।");
         }
@@ -2290,7 +2216,9 @@
             }, 500);
         }
 
-        // Custom Player Controls
+        // ==========================================
+        // প্লেয়ার কন্ট্রোলস, টেনে কাটা ও ডাবল টাচ জেসচার
+        // ==========================================
         function setupCustomPlayerControls() {
             const playPauseBtn = document.getElementById('playPauseBtn');
             const fullscreenBtn = document.getElementById('fullscreenBtn');
@@ -2303,63 +2231,38 @@
             const customControls = document.getElementById('customControls');
 
             let lastTap = 0;
+            customControls.addEventListener('click', (e) => {
+                if (playerState === 'minimized') {
+                    if (!miniDragOccurred) expandPlayer();
+                    e.stopPropagation();
+                    return;
+                }
 
-            // মোবাইলের রেসপনসিভ ডাবল-ট্যাপ ও সিঙ্গল-ট্যাপ ডিটেকশন
-            customControls.addEventListener('touchstart', (e) => {
-                if (playerState === 'minimized') return;
                 if (e.target.closest('button') || e.target.closest('.progress-bar-container') || e.target.closest('#playerQualityMenu')) {
                     return;
                 }
                 
+                const rect = customControls.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const width = rect.width;
                 const now = new Date().getTime();
                 const tapLength = now - lastTap;
                 
                 if (tapLength < 300 && tapLength > 0) {
-                    e.preventDefault(); 
-                    const rect = customControls.getBoundingClientRect();
-                    const touchX = e.touches[0].clientX - rect.left;
-                    const width = rect.width;
-                    
-                    if (touchX < width * 0.4) {
+                    if (clickX < width * 0.4) {
                         player.currentTime = Math.max(0, player.currentTime - 10);
                         showGestureAnimation(gestureLeft, '<i class="fa-solid fa-backward"></i> 10s');
-                    } else if (touchX > width * 0.6) {
+                    } else if (clickX > width * 0.6) {
                         player.currentTime = Math.min(player.duration || 0, player.currentTime + 10);
                         showGestureAnimation(gestureRight, '10s <i class="fa-solid fa-forward"></i>');
                     }
                     videoContainer.classList.add('show-controls');
                     resetControlsTimeout();
                 } else {
-                    // সিঙ্গল টাচ হলে শুধু কন্ট্রোলস টগল হবে
-                    if (videoContainer.classList.contains('show-controls')) {
-                        videoContainer.classList.remove('show-controls');
-                    } else {
-                        videoContainer.classList.add('show-controls');
-                        resetControlsTimeout();
-                    }
+                    videoContainer.classList.toggle('show-controls');
+                    resetControlsTimeout();
                 }
                 lastTap = now;
-            });
-
-            // পিসির মাউস ডাবল-ক্লিক হ্যান্ডলিং
-            customControls.addEventListener('dblclick', (e) => {
-                if (playerState === 'minimized') return;
-                if (e.target.closest('button') || e.target.closest('.progress-bar-container') || e.target.closest('#playerQualityMenu')) {
-                    return;
-                }
-                const rect = customControls.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                const width = rect.width;
-                
-                if (clickX < width * 0.4) {
-                    player.currentTime = Math.max(0, player.currentTime - 10);
-                    showGestureAnimation(gestureLeft, '<i class="fa-solid fa-backward"></i> 10s');
-                } else if (clickX > width * 0.6) {
-                    player.currentTime = Math.min(player.duration || 0, player.currentTime + 10);
-                    showGestureAnimation(gestureRight, '10s <i class="fa-solid fa-forward"></i>');
-                }
-                videoContainer.classList.add('show-controls');
-                resetControlsTimeout();
             });
 
             playPauseBtn.addEventListener('click', togglePlayPause);
@@ -2375,7 +2278,7 @@
                 resetControlsTimeout();
             }
 
-            // স্পর্শ টাইমলাইন স্ক্রাবিং (কাটা কাটি করার মেকানিজম)
+            // স্পর্শ টাইমলাইন স্ক্রাবিং (YouTube Style - টানার সময় ভিডিও আটকাবে না)
             progressBarContainer.addEventListener('mousedown', startDrag);
             progressBarContainer.addEventListener('touchstart', startDrag);
 
@@ -2408,10 +2311,11 @@
                 if (percent < 0) percent = 0;
                 if (percent > 1) percent = 1;
                 
-                dragPercent = percent; 
+                dragPercent = percent; // স্ক্রাব রিলিজ পজিশন ট্র্যাক রাখার জন্য সেভ
                 progressBarInner.style.width = `${percent * 100}%`;
                 
                 const duration = player.duration || 0;
+                // টানার সময় ভিডিও আটকানো এড়াতে কেবল টেক্সট পরিবর্তন হবে
                 timeDisplay.innerText = `${formatSecs(percent * duration)} / ${formatSecs(duration)}`;
             }
 
@@ -2425,6 +2329,7 @@
                 
                 const duration = player.duration || 0;
                 if (duration) {
+                    // হাত ছেড়ে দেওয়ার সাথে সাথে কাঙ্ক্ষিত সেকেন্ডে নিয়ে যাবে (ইউটিউব এর মতো)
                     player.currentTime = dragPercent * duration; 
                 }
                 resetControlsTimeout(); 
@@ -2522,7 +2427,7 @@
         }
 
         // ==========================================
-        // ডাউনলোড প্রসেস লজিক (রিয়েল ফাস্ট ডাউনলোডার)
+        // ডাউনলোড লজিক কানেকশন
         // ==========================================
         function resetDownloadBtnState() {
             if (activeDownloadPoll) clearInterval(activeDownloadPoll);
@@ -2536,27 +2441,59 @@
             closeDownloadSheet();
             
             circularProgressText.style.display = 'block';
-            circularProgressText.innerText = 'ডাউনলোড শুরু হচ্ছে...';
+            circularProgressText.innerText = 'ডাউনলোড রিকোয়েস্ট প্রসেস হচ্ছে...';
             downloadBtnContent.innerHTML = `<i class="fa-solid fa-spinner spinner"></i>`;
 
             const currentTitle = document.getElementById('videoTitle').innerText;
-            const downloadUrl = `${SERVER_URL}/api/download-fast?url=${encodeURIComponent(currentUrl)}&quality=${quality}&title=${encodeURIComponent(currentTitle)}`;
+            const currentThumbnail = document.getElementById('videoThumb').src;
+
+            fetch(`${SERVER_URL}/api/download-start?url=${encodeURIComponent(currentUrl)}&quality=${quality}&title=${encodeURIComponent(currentTitle)}&thumbnail=${encodeURIComponent(currentThumbnail)}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.downloadId) {
+                        pollDownloadStatus(data.downloadId);
+                    } else {
+                        throw new Error("ফাইল ডাউনলোডেড টাস্ক আইডি পাওয়া যায়নি!");
+                    }
+                })
+                .catch(err => {
+                    console.error("Download fail:", err);
+                    circularProgressText.innerText = 'ডাউনলোড রিকোয়েস্ট ব্যর্থ হয়েছে!';
+                    downloadBtnContent.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color: var(--accent-color);"></i>`;
+                });
+        }
+
+        function pollDownloadStatus(downloadId) {
+            if (activeDownloadPoll) clearInterval(activeDownloadPoll);
             
-            // ডাউনলোড তালিকায় মেটাডাটা প্রিপেয়ার করে সেভ করা হচ্ছে
-            saveToOfflineDownloads(currentTitle, downloadUrl);
-            updateDownloadBadge();
-
-            // ব্রাউজারের ডাইরেক্ট ডাউনলোড উইন্ডো ট্রিগার
-            const downloadLink = document.createElement('a');
-            downloadLink.href = downloadUrl;
-            document.body.appendChild(downloadLink);
-            downloadLink.click();
-            document.body.removeChild(downloadLink);
-
-            setTimeout(() => {
-                downloadBtnContent.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #22c55e;"></i>`;
-                circularProgressText.innerText = 'ডাউনলোড ব্যাকগ্রাউন্ডে ব্রাউজারে চালু হয়েছে ভাই!';
-            }, 2000);
+            activeDownloadPoll = setInterval(() => {
+                fetch(`${SERVER_URL}/api/download-status?id=${downloadId}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.status === 'downloading') {
+                            const percent = data.percent || 0;
+                            const offset = circleCircumference - (percent / 100) * circleCircumference;
+                            downloadProgressCircle.style.strokeDashoffset = offset;
+                            circularProgressText.innerText = `${percent}% (${data.totalSize}) • গতি: ${data.speed}`;
+                        } else if (data.status === 'completed') {
+                            clearInterval(activeDownloadPoll);
+                            downloadProgressCircle.style.strokeDashoffset = 0;
+                            downloadBtnContent.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #22c55e;"></i>`;
+                            circularProgressText.innerText = 'ডাউনলোড সম্পন্ন হয়েছে!';
+                            
+                            const localVideoUrl = `${SERVER_URL}/videos/${data.fileName}`;
+                            saveToOfflineDownloads(document.getElementById('videoTitle').innerText, localVideoUrl);
+                            updateDownloadBadge();
+                        } else if (data.status === 'failed') {
+                            clearInterval(activeDownloadPoll);
+                            circularProgressText.innerText = 'ডাউনলোড টাস্ক ব্যর্থ হয়েছে!';
+                            downloadBtnContent.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: var(--accent-color);"></i>`;
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Poll Error:", err);
+                    });
+            }, 1000);
         }
 
         function saveToOfflineDownloads(title, url) {
@@ -2565,11 +2502,8 @@
                 list = JSON.parse(localStorage.getItem('offline_dl_list')) || [];
             } catch (e) { list = []; }
             
-            // ডুপ্লিকেট চেকিং
-            if (!list.some(item => item.title === title)) {
-                list.push({ title, url, id: extractVideoId(currentUrl) || `offline_${Date.now()}` });
-                localStorage.setItem('offline_dl_list', JSON.stringify(list));
-            }
+            list.push({ title, url, id: extractVideoId(url) || `offline_${Date.now()}` });
+            localStorage.setItem('offline_dl_list', JSON.stringify(list));
         }
 
         function updateDownloadBadge() {
@@ -2595,7 +2529,7 @@
                     const card = document.createElement('div');
                     card.className = 'video-card';
                     
-                    const isLocalPath = video.url.includes('/api/get-file?file=') || video.url.includes('/videos/') || video.url.includes('/api/download-fast?');
+                    const isLocalPath = video.url.includes('/videos/');
                     const badgeText = video.isGallery ? 'Gallery Video' : (isLocalPath ? 'Termux Offline' : 'Offline Entry');
                     const thumbImg = (video.isGallery || isLocalPath) ? 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=500' : `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`;
                     
