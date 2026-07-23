@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -819,7 +818,7 @@
             100% { transform: scale(1.4); opacity: 0; }
         }
 
-        /* মিনি প্লেয়ার ক্লোজ ক্রস বাটন */
+        /* মীন প্লেয়ার ক্লোজ ক্রস বাটন */
         .mini-close-btn {
             position: absolute;
             top: 6px;
@@ -1218,7 +1217,7 @@
                     <div id="circularProgressBtn" class="circular-progress-download-container" onclick="openDownloadSheet()" title="ডাউনলোড চয়েজ">
                         <svg class="progress-ring" width="56" height="56">
                             <circle class="progress-ring__background" stroke="#1e293b" stroke-width="4" fill="transparent" r="24" cx="28" cy="28"/>
-                            <circle id="downloadProgressCircle" class="progress-ring__circle" stroke="#ef4444" stroke-width="4" fill="transparent" r="24" cx="28" cy="28" stroke-dasharray="150.8" stroke-dashoffset="150.8"/>
+                            <circle id="downloadProgressCircle" class="progress-ring__circle" stroke="#ef4444" stroke-width="4" fill="transparent" r="24" cx="24" cy="24" stroke-dasharray="150.8" stroke-dashoffset="150.8"/>
                         </svg>
                         <div id="downloadBtnContent" class="download-icon-inner">
                             <i class="fa-solid fa-arrow-down"></i>
@@ -2304,38 +2303,63 @@
             const customControls = document.getElementById('customControls');
 
             let lastTap = 0;
-            customControls.addEventListener('click', (e) => {
-                if (playerState === 'minimized') {
-                    if (!miniDragOccurred) expandPlayer();
-                    e.stopPropagation();
-                    return;
-                }
 
+            // মোবাইলের রেসপনসিভ ডাবল-ট্যাপ ও সিঙ্গল-ট্যাপ ডিটেকশন
+            customControls.addEventListener('touchstart', (e) => {
+                if (playerState === 'minimized') return;
                 if (e.target.closest('button') || e.target.closest('.progress-bar-container') || e.target.closest('#playerQualityMenu')) {
                     return;
                 }
                 
-                const rect = customControls.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                const width = rect.width;
                 const now = new Date().getTime();
                 const tapLength = now - lastTap;
                 
                 if (tapLength < 300 && tapLength > 0) {
-                    if (clickX < width * 0.4) {
+                    e.preventDefault(); 
+                    const rect = customControls.getBoundingClientRect();
+                    const touchX = e.touches[0].clientX - rect.left;
+                    const width = rect.width;
+                    
+                    if (touchX < width * 0.4) {
                         player.currentTime = Math.max(0, player.currentTime - 10);
                         showGestureAnimation(gestureLeft, '<i class="fa-solid fa-backward"></i> 10s');
-                    } else if (clickX > width * 0.6) {
+                    } else if (touchX > width * 0.6) {
                         player.currentTime = Math.min(player.duration || 0, player.currentTime + 10);
                         showGestureAnimation(gestureRight, '10s <i class="fa-solid fa-forward"></i>');
                     }
                     videoContainer.classList.add('show-controls');
                     resetControlsTimeout();
                 } else {
-                    videoContainer.classList.toggle('show-controls');
-                    resetControlsTimeout();
+                    // সিঙ্গল টাচ হলে শুধু কন্ট্রোলস টগল হবে
+                    if (videoContainer.classList.contains('show-controls')) {
+                        videoContainer.classList.remove('show-controls');
+                    } else {
+                        videoContainer.classList.add('show-controls');
+                        resetControlsTimeout();
+                    }
                 }
                 lastTap = now;
+            });
+
+            // পিসির মাউস ডাবল-ক্লিক হ্যান্ডলিং
+            customControls.addEventListener('dblclick', (e) => {
+                if (playerState === 'minimized') return;
+                if (e.target.closest('button') || e.target.closest('.progress-bar-container') || e.target.closest('#playerQualityMenu')) {
+                    return;
+                }
+                const rect = customControls.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const width = rect.width;
+                
+                if (clickX < width * 0.4) {
+                    player.currentTime = Math.max(0, player.currentTime - 10);
+                    showGestureAnimation(gestureLeft, '<i class="fa-solid fa-backward"></i> 10s');
+                } else if (clickX > width * 0.6) {
+                    player.currentTime = Math.min(player.duration || 0, player.currentTime + 10);
+                    showGestureAnimation(gestureRight, '10s <i class="fa-solid fa-forward"></i>');
+                }
+                videoContainer.classList.add('show-controls');
+                resetControlsTimeout();
             });
 
             playPauseBtn.addEventListener('click', togglePlayPause);
@@ -2498,7 +2522,7 @@
         }
 
         // ==========================================
-        // ডাউনলোড প্রসেস লজিক (গ্যালারি পুশ কানেকশন)
+        // ডাউনলোড প্রসেস লজিক (রিয়েল ফাস্ট ডাউনলোডার)
         // ==========================================
         function resetDownloadBtnState() {
             if (activeDownloadPoll) clearInterval(activeDownloadPoll);
@@ -2518,6 +2542,10 @@
             const currentTitle = document.getElementById('videoTitle').innerText;
             const downloadUrl = `${SERVER_URL}/api/download-fast?url=${encodeURIComponent(currentUrl)}&quality=${quality}&title=${encodeURIComponent(currentTitle)}`;
             
+            // ডাউনলোড তালিকায় মেটাডাটা প্রিপেয়ার করে সেভ করা হচ্ছে
+            saveToOfflineDownloads(currentTitle, downloadUrl);
+            updateDownloadBadge();
+
             // ব্রাউজারের ডাইরেক্ট ডাউনলোড উইন্ডো ট্রিগার
             const downloadLink = document.createElement('a');
             downloadLink.href = downloadUrl;
@@ -2537,8 +2565,11 @@
                 list = JSON.parse(localStorage.getItem('offline_dl_list')) || [];
             } catch (e) { list = []; }
             
-            list.push({ title, url, id: extractVideoId(url) || `offline_${Date.now()}` });
-            localStorage.setItem('offline_dl_list', JSON.stringify(list));
+            // ডুপ্লিকেট চেকিং
+            if (!list.some(item => item.title === title)) {
+                list.push({ title, url, id: extractVideoId(currentUrl) || `offline_${Date.now()}` });
+                localStorage.setItem('offline_dl_list', JSON.stringify(list));
+            }
         }
 
         function updateDownloadBadge() {
@@ -2564,7 +2595,7 @@
                     const card = document.createElement('div');
                     card.className = 'video-card';
                     
-                    const isLocalPath = video.url.includes('/api/get-file?file=') || video.url.includes('/videos/');
+                    const isLocalPath = video.url.includes('/api/get-file?file=') || video.url.includes('/videos/') || video.url.includes('/api/download-fast?');
                     const badgeText = video.isGallery ? 'Gallery Video' : (isLocalPath ? 'Termux Offline' : 'Offline Entry');
                     const thumbImg = (video.isGallery || isLocalPath) ? 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=500' : `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`;
                     
